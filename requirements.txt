@@ -1,0 +1,5 @@
+streamlit
+fastapi
+sqlalchemy
+uvicorn
+requests
