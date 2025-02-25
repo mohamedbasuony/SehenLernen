@@ -115,7 +115,7 @@ with tab3:
     st.write("Visualization Diagram")
 
 # --- Draggable Icons Section ---
-st.subheader("Workflow Bar with Draggable Icons")
+st.subheader("Workflow Bar")
 icon1, icon2, icon3 = st.columns(3)
 with icon1:
     st.write("🔧")
@@ -125,7 +125,7 @@ with icon3:
     st.write("📊")
 
 # --- Thumbnail Section ---
-st.subheader("Thumbnails of Images")
+st.subheader("Thumbnails ")
 st.image(["https://via.placeholder.com/100", "https://via.placeholder.com/100", "https://via.placeholder.com/100"], width=100)
 
 # --- Sidebar: Options for the Selected Tool ---
