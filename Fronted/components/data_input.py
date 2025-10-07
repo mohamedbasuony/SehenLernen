@@ -83,6 +83,11 @@ def render_data_input():
                         st.session_state["extractor_image_ids"] = image_ids
                         # Also expose to the rest of the app (Feature Selection etc.)
                         st.session_state["uploaded_image_ids"] = image_ids
+                        
+                        # Fetch the images from backend as PIL objects for preview and feature selection
+                        with st.spinner("Loading images for preview..."):
+                            images = api_client.get_all_images()
+                            st.session_state["images"] = images
 
                         st.success(f"Extracted {len(image_ids)} images successfully.")
                         if errors:

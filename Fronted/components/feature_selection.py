@@ -42,49 +42,92 @@ def _get_image_id_for_index(idx: int) -> str | None:
     return None
 
 
-def _ensure_backend_sync():
+def _ensure_backend_sync(force_reupload: bool = False):
     """Ensure backend is synchronized with frontend images by re-uploading if needed."""
     try:
-        from utils.api_client import get_current_image_ids, clear_all_backend_images, upload_images
+        from utils.api_client import get_current_image_ids, clear_all_backend_images, upload_images, get_all_images
         
         # Get current state
         frontend_images = st.session_state.get("images", [])
         backend_ids = get_current_image_ids()
         
-        # If counts don't match, clean backend and re-upload
-        if len(frontend_images) != len(backend_ids):
-            # Clear backend storage
-            clear_all_backend_images()
-            
-            # Re-upload all frontend images
-            if frontend_images:
-                # Convert PIL images to uploadable format
-                class FileWrapper:
-                    def __init__(self, name, data):
-                        self.name = name
-                        self.data = data
-                        self.type = "image/png"
-                    def getvalue(self):
-                        return self.data
-                
-                image_files = []
-                for i, img in enumerate(frontend_images):
-                    img_bytes = io.BytesIO()
-                    img.save(img_bytes, format='PNG')
-                    file_wrapper = FileWrapper(f"image_{i+1}.png", img_bytes.getvalue())
-                    image_files.append(file_wrapper)
-                
-                # Upload images and get new IDs
-                new_ids = upload_images(image_files)
-                st.session_state["uploaded_image_ids"] = new_ids
+        logging.info(f"Sync check: {len(frontend_images)} frontend images, {len(backend_ids)} backend IDs, force={force_reupload}")
+        
+        # If we have backend images but no frontend PIL images, fetch them from backend
+        if not frontend_images and backend_ids:
+            logging.info("No frontend images but backend has IDs - fetching from backend")
+            try:
+                frontend_images = get_all_images()
+                st.session_state["images"] = frontend_images
+                st.session_state["uploaded_image_ids"] = backend_ids
+                logging.info(f"Fetched {len(frontend_images)} images from backend")
                 return True
+            except Exception as e:
+                logging.error(f"Failed to fetch images from backend: {e}")
+                st.session_state["classifier_sync_error"] = f"Failed to fetch images: {str(e)}"
+                return False
+        
+        # If forced or counts don't match, clean backend and re-upload
+        if force_reupload or len(frontend_images) != len(backend_ids):
+            logging.info(f"Re-uploading: force={force_reupload}, mismatch={len(frontend_images) != len(backend_ids)}")
+            
+            if not frontend_images:
+                st.session_state["uploaded_image_ids"] = []
+                logging.warning("No frontend images to upload")
+                st.session_state["classifier_sync_error"] = "No images in session state to upload"
+                return False
+            
+            # Clear backend storage
+            logging.info("Clearing backend storage...")
+            clear_all_backend_images()
+            logging.info("Backend cleared successfully")
+            
+            # Convert PIL images to uploadable format
+            class FileWrapper:
+                def __init__(self, name, data):
+                    self.name = name
+                    self.data = data
+                    self.type = "image/png"
+                def getvalue(self):
+                    return self.data
+            
+            import time
+            timestamp = int(time.time() * 1000)  # milliseconds for uniqueness
+            image_files = []
+            for i, img in enumerate(frontend_images):
+                img_bytes = io.BytesIO()
+                img.save(img_bytes, format='PNG')
+                unique_filename = f"image_{timestamp}_{i+1}.png"
+                file_wrapper = FileWrapper(unique_filename, img_bytes.getvalue())
+                image_files.append(file_wrapper)
+            
+            logging.info(f"Prepared {len(image_files)} files for upload")
+            
+            # Upload images and get new IDs
+            new_ids = upload_images(image_files)
+            logging.info(f"Backend returned {len(new_ids)} IDs: {new_ids}")
+            
+            st.session_state["uploaded_image_ids"] = new_ids
+            logging.info(f"Updated session state with {len(new_ids)} IDs")
+            
+            # Verify the upload was successful
+            if len(new_ids) != len(frontend_images):
+                error_msg = f"Upload mismatch: expected {len(frontend_images)} IDs, got {len(new_ids)}"
+                logging.error(error_msg)
+                st.session_state["classifier_sync_error"] = error_msg
+                return False
+            
+            logging.info("Sync successful - all images uploaded and verified")
+            return True
         else:
             # Counts match, just update session state
             st.session_state["uploaded_image_ids"] = backend_ids
+            logging.info("Counts match - sync successful")
             return True
             
     except Exception as e:
-        logging.error(f"Failed to sync backend: {e}")
+        logging.error(f"Failed to sync backend: {e}", exc_info=True)
+        st.session_state["classifier_sync_error"] = str(e)
         return False
 
 
@@ -198,6 +241,7 @@ def _render_metrics_section(metrics: dict | None, heading: str) -> None:
 
 # ---------- Main Entry ----------
 def render_feature_selection():
+    import pandas as pd  # Ensure pandas is available in function scope
     st.header("Feature Selection")
     _init_state()
 
@@ -1657,6 +1701,502 @@ def render_feature_selection():
         with col2:
             if st.button("Next: Statistical Analysis", key="next_stats"):
                 st.session_state["active_section"] = "Statistics Analysis"
+
+    # --- Classifier Training ---
+    with tab10:
+        st.subheader("Classifier Training")
+        st.caption(
+            "Label your uploaded images, pick a feature representation, and train a classical ML classifier. "
+            "Use the holdout split to benchmark the model, or run additional predictions once training completes."
+        )
+
+        st.markdown(
+            """
+            **Quick guide**
+
+            1. Review each image row below and type in a label for every entry you want to use for training.
+            2. Decide whether each image should be part of the training group or kept aside for testing.
+            3. Pick a feature recipe (HOG, LBP, or CNN embeddings) and the classifier type, then press **Train classifier**.
+            4. Once the model is trained you can run extra predictions on any subset of images with a single click.
+            """
+        )
+
+        image_ids: list[str] = st.session_state.get("uploaded_image_ids", [])
+
+        # Debug: show current state
+        st.caption(f"🔍 Debug: {len(images)} images in session state, {len(image_ids)} image IDs from backend")
+
+        if len(image_ids) != len(images):
+            with st.spinner("Aligning the uploaded images with the training workspace..."):
+                sync_ok = _ensure_backend_sync(force_reupload=False)  # Try without force first
+            
+            # Re-fetch state after sync
+            image_ids = st.session_state.get("uploaded_image_ids", [])
+            images = st.session_state.get("images", [])
+            
+            # Double-check backend state
+            from utils.api_client import get_current_image_ids
+            actual_backend_ids = get_current_image_ids()
+            
+            sync_error = st.session_state.pop("classifier_sync_error", None)
+            
+            st.caption(f"🔍 After sync: {len(images)} images, {len(image_ids)} IDs in session, {len(actual_backend_ids)} actual backend IDs, sync_ok={sync_ok}")
+            
+            if not sync_ok or len(image_ids) != len(images) or len(actual_backend_ids) != len(images):
+                st.error(
+                    "We could not align the uploaded images with the training workspace. "
+                    "Please refresh the dataset so every image has a matching identifier."
+                )
+                if sync_error:
+                    if "Connection refused" in sync_error or "Failed to establish a new connection" in sync_error:
+                        st.info(
+                            "The analysis server is not responding. Please start the FastAPI backend "
+                            "(run `uvicorn app.main:app --reload` inside the `Backend` folder) and try again."
+                        )
+                    else:
+                        st.caption(f"Technical detail: {sync_error}")
+                
+                col1, col2 = st.columns(2)
+                with col1:
+                    if st.button("Refresh training dataset", key="classifier_resync_btn"):
+                        st.session_state.pop("classifier_training_df", None)
+                        st.session_state.pop("uploaded_image_ids", None)
+                        st.session_state.pop("classifier_sync_error", None)
+                        st.session_state.pop("images", None)
+                        st.rerun()
+                with col2:
+                    if st.button("Force re-upload images", key="classifier_force_reupload_btn"):
+                        _ensure_backend_sync(force_reupload=True)
+                        st.rerun()
+                st.info(
+                    "Tip: If images were recently added or replaced, visit the **Data Input** section and upload them again, "
+                    "then return to this tab."
+                )
+                return
+
+        st.markdown("#### 1. Label Your Dataset")
+        classifier_table: pd.DataFrame = _ensure_classifier_table(image_ids).copy()
+        classifier_table["label"] = classifier_table["label"].fillna("").astype(str)
+        classifier_table["split"] = classifier_table["split"].fillna("train").astype(str)
+
+        edited_df = st.data_editor(
+            classifier_table,
+            column_config={
+                "label": st.column_config.TextColumn("Label", help="Assign a class label (required for training rows)."),
+                "split": st.column_config.SelectboxColumn(
+                    "Split",
+                    options=["train", "test"],
+                    help="Rows marked as 'train' are used for fitting. 'test' rows are held out for evaluation.",
+                ),
+                "image_index": st.column_config.NumberColumn("Image Index", format="%d"),
+                "image_id": st.column_config.TextColumn("Image ID"),
+            },
+            disabled=["image_index", "image_id"],
+            hide_index=True,
+            use_container_width=True,
+            key="classifier_training_editor",
+        )
+
+        # Normalise edited values and persist them in session_state
+        if isinstance(edited_df, pd.DataFrame):
+            classifier_table = edited_df.copy()
+        else:
+            classifier_table = pd.DataFrame(edited_df)
+
+        classifier_table["image_index"] = classifier_table["image_index"].astype(int)
+        classifier_table["label"] = classifier_table["label"].fillna("").astype(str)
+        classifier_table["split"] = classifier_table["split"].fillna("train").astype(str).str.lower()
+
+        st.session_state["classifier_training_df"] = classifier_table
+
+        classifier_table["label"] = classifier_table["label"].str.strip()
+        train_rows = classifier_table[(classifier_table["split"] == "train") & (classifier_table["label"] != "")]
+        test_rows = classifier_table[classifier_table["split"] == "test"]
+
+        col_a, col_b = st.columns(2)
+        col_a.metric("Labeled training images", len(train_rows))
+        distinct_labels = sorted(train_rows["label"].unique())
+        col_b.metric("Unique labels", len(distinct_labels))
+
+        if len(distinct_labels) < 2:
+            st.info("Provide at least two different labels across your training images.")
+
+        st.markdown("#### 2. Feature Extraction")
+        feature_type = st.selectbox(
+            "Feature representation",
+            options=["hog", "lbp", "embedding"],
+            format_func=lambda x: {
+                "hog": "HOG (Histogram of Oriented Gradients)",
+                "lbp": "Local Binary Pattern Histogram",
+                "embedding": "CNN Embeddings (ResNet/MobileNet)",
+            }[x],
+            index=0,
+            key="classifier_feature_type",
+        )
+
+        hog_payload: dict | None = None
+        lbp_payload: dict | None = None
+        embedding_model: str | None = None
+
+        if feature_type == "hog":
+            with st.expander("HOG options", expanded=False):
+                hog_orient = st.slider("Orientations", min_value=1, max_value=24, value=9, key="hog_orientations")
+                cell_col1, cell_col2 = st.columns(2)
+                with cell_col1:
+                    hog_cell_h = st.number_input(
+                        "Pixels per cell (height)",
+                        min_value=4,
+                        max_value=128,
+                        value=8,
+                        step=1,
+                        key="hog_cell_h",
+                    )
+                with cell_col2:
+                    hog_cell_w = st.number_input(
+                        "Pixels per cell (width)",
+                        min_value=4,
+                        max_value=128,
+                        value=8,
+                        step=1,
+                        key="hog_cell_w",
+                    )
+                block_col1, block_col2 = st.columns(2)
+                with block_col1:
+                    hog_block_y = st.number_input(
+                        "Cells per block (rows)",
+                        min_value=1,
+                        max_value=8,
+                        value=2,
+                        step=1,
+                        key="hog_block_y",
+                    )
+                with block_col2:
+                    hog_block_x = st.number_input(
+                        "Cells per block (columns)",
+                        min_value=1,
+                        max_value=8,
+                        value=2,
+                        step=1,
+                        key="hog_block_x",
+                    )
+                resize_col1, resize_col2 = st.columns(2)
+                with resize_col1:
+                    hog_resize_w = st.number_input(
+                        "Resize width (pixels)",
+                        min_value=32,
+                        max_value=1024,
+                        value=128,
+                        step=16,
+                        key="hog_resize_width",
+                    )
+                with resize_col2:
+                    hog_resize_h = st.number_input(
+                        "Resize height (pixels)",
+                        min_value=32,
+                        max_value=1024,
+                        value=128,
+                        step=16,
+                        key="hog_resize_height",
+                    )
+                hog_block_norm = st.selectbox(
+                    "Block normalisation",
+                    options=["L2-Hys", "L1", "L1-sqrt", "L2"],
+                    index=0,
+                    key="hog_block_norm",
+                )
+
+            hog_payload = {
+                "orientations": int(hog_orient),
+                "pixels_per_cell": [int(hog_cell_h), int(hog_cell_w)],
+                "cells_per_block": [int(hog_block_y), int(hog_block_x)],
+                "resize_width": int(hog_resize_w),
+                "resize_height": int(hog_resize_h),
+                "block_norm": hog_block_norm,
+            }
+
+        elif feature_type == "lbp":
+            with st.expander("LBP options", expanded=False):
+                lbp_radius = st.slider("Radius", min_value=1, max_value=16, value=1, key="lbp_radius")
+                lbp_neighbors = st.slider(
+                    "Number of sampling points",
+                    min_value=4,
+                    max_value=32,
+                    value=8,
+                    step=1,
+                    key="lbp_neighbors",
+                )
+                lbp_method = st.selectbox(
+                    "LBP method",
+                    options=["default", "ror", "uniform", "var"],
+                    index=2,
+                    key="lbp_method",
+                )
+                lbp_normalize = st.checkbox("Normalize histogram", value=True, key="lbp_normalize")
+
+            lbp_payload = {
+                "radius": int(lbp_radius),
+                "num_neighbors": int(lbp_neighbors),
+                "method": lbp_method,
+                "normalize": bool(lbp_normalize),
+            }
+
+        else:  # embedding
+            embedding_model = st.selectbox(
+                "Embedding backbone",
+                options=["resnet50", "resnet18", "mobilenet_v2"],
+                format_func=lambda x: {
+                    "resnet50": "ResNet-50 (2048-d)",
+                    "resnet18": "ResNet-18 (512-d)",
+                    "mobilenet_v2": "MobileNet V2 (1280-d)",
+                }[x],
+                index=0,
+                key="embedding_model",
+            )
+
+        st.markdown("#### 3. Classifier Configuration")
+        classifier_type = st.selectbox(
+            "Classifier",
+            options=["svm", "knn", "logistic"],
+            format_func=lambda x: {
+                "svm": "Support Vector Machine",
+                "knn": "k-Nearest Neighbours",
+                "logistic": "Logistic Regression",
+            }[x],
+            index=0,
+            key="classifier_type",
+        )
+
+        hyperparameters: dict[str, object] = {}
+        if classifier_type == "svm":
+            with st.expander("SVM hyperparameters", expanded=False):
+                svm_kernel = st.selectbox(
+                    "Kernel",
+                    options=["rbf", "linear", "poly", "sigmoid"],
+                    index=0,
+                    key="svm_kernel",
+                )
+                svm_c = st.number_input("C (regularisation)", min_value=0.01, max_value=1000.0, value=1.0, step=0.5, key="svm_c")
+                svm_gamma = st.selectbox(
+                    "Gamma",
+                    options=["scale", "auto"],
+                    index=0,
+                    key="svm_gamma",
+                )
+            hyperparameters = {"kernel": svm_kernel, "C": float(svm_c), "gamma": svm_gamma}
+
+        elif classifier_type == "knn":
+            with st.expander("k-NN hyperparameters", expanded=False):
+                knn_neighbors = st.slider("Number of neighbours", min_value=1, max_value=25, value=5, key="knn_neighbors")
+                knn_weights = st.selectbox(
+                    "Weighting",
+                    options=["uniform", "distance"],
+                    index=0,
+                    key="knn_weights",
+                )
+            hyperparameters = {"n_neighbors": int(knn_neighbors), "weights": knn_weights}
+
+        else:  # logistic regression
+            with st.expander("Logistic regression hyperparameters", expanded=False):
+                log_reg_c = st.number_input(
+                    "Inverse regularisation strength (C)",
+                    min_value=0.01,
+                    max_value=100.0,
+                    value=1.0,
+                    step=0.5,
+                    key="log_reg_c",
+                )
+                log_reg_iter = st.number_input(
+                    "Max iterations",
+                    min_value=100,
+                    max_value=5000,
+                    value=1000,
+                    step=100,
+                    key="log_reg_max_iter",
+                )
+            hyperparameters = {"C": float(log_reg_c), "max_iter": int(log_reg_iter)}
+
+        st.markdown("#### 4. Train & Evaluate")
+        config_col1, config_col2, config_col3 = st.columns(3)
+        with config_col1:
+            test_size = st.slider(
+                "Validation split size",
+                min_value=0.0,
+                max_value=0.5,
+                value=0.2,
+                step=0.05,
+                key="classifier_validation_split",
+            )
+        with config_col2:
+            random_state = st.number_input(
+                "Random seed",
+                min_value=0,
+                max_value=10_000,
+                value=42,
+                step=1,
+                key="classifier_random_state",
+            )
+        with config_col3:
+            return_probabilities = st.checkbox(
+                "Return probabilities",
+                value=True,
+                key="classifier_return_probabilities",
+            )
+
+        train_button_disabled = len(train_rows) < 2 or len(distinct_labels) < 2
+
+        if st.button("Train classifier", type="primary", disabled=train_button_disabled, key="classifier_train_btn"):
+            if train_button_disabled:
+                st.warning("Select at least two training images with different labels.")
+            else:
+                training_samples = [
+                    {"image_index": int(row.image_index), "label": str(row.label)}
+                    for row in train_rows.itertuples()
+                ]
+                test_samples = []
+                for row in test_rows.itertuples():
+                    sample = {"image_index": int(row.image_index)}
+                    if isinstance(row.label, str) and row.label.strip():
+                        sample["label"] = row.label.strip()
+                    test_samples.append(sample)
+
+                payload: dict[str, object] = {
+                    "feature_type": feature_type,
+                    "classifier_type": classifier_type,
+                    "training_samples": training_samples,
+                    "test_size": float(test_size),
+                    "random_state": int(random_state),
+                    "return_probabilities": bool(return_probabilities),
+                }
+
+                if hyperparameters:
+                    payload["hyperparameters"] = hyperparameters
+                if feature_type == "hog" and hog_payload:
+                    payload["hog_options"] = hog_payload
+                if feature_type == "lbp" and lbp_payload:
+                    payload["lbp_options"] = lbp_payload
+                if feature_type == "embedding" and embedding_model:
+                    payload["embedding_model"] = embedding_model
+                if test_samples:
+                    payload["test_samples"] = test_samples
+
+                try:
+                    with st.spinner("Training classifier..."):
+                        result = train_classifier(payload)
+                    st.session_state["classifier_training_result"] = result
+                    st.session_state["trained_model_id"] = result.get("model_id")
+                    st.success("Model trained successfully.")
+                except Exception as e:
+                    error_msg = str(e)
+                    response_obj = getattr(e, "response", None)
+                    if response_obj is not None:
+                        try:
+                            error_msg = response_obj.json().get("detail", error_msg)
+                        except Exception:
+                            pass
+                    st.error(f"Training failed: {error_msg}")
+
+        latest_training = st.session_state.get("classifier_training_result")
+        if latest_training:
+            st.markdown("#### Training Summary")
+            st.write(f"Model ID: `{latest_training.get('model_id')}`")
+            st.write(
+                f"Feature type: **{latest_training.get('feature_type', '').upper()}**, "
+                f"Classifier: **{latest_training.get('classifier_type', '').upper()}**"
+            )
+            st.write(f"Training samples: {latest_training.get('num_training_samples', 0)} "
+                     f"| Feature length: {latest_training.get('feature_vector_length')}")
+
+            _render_metrics_section(latest_training.get("train_metrics"), "Training Metrics")
+            _render_metrics_section(latest_training.get("validation_metrics"), "Validation Metrics")
+            _render_metrics_section(latest_training.get("test_metrics"), "Test Metrics")
+
+            test_predictions = latest_training.get("test_predictions") or []
+            if test_predictions:
+                pred_rows = []
+                for entry in test_predictions:
+                    pred_rows.append(
+                        {
+                            "Image": f"Image {int(entry.get('image_index', -1)) + 1}",
+                            "Image ID": entry.get("image_id", ""),
+                            "Prediction": entry.get("prediction", ""),
+                            "Probabilities": _probabilities_to_string(entry.get("probabilities")),
+                            "Actual Label": entry.get("actual_label") or "",
+                        }
+                    )
+                st.caption("Holdout predictions")
+                st.dataframe(pd.DataFrame(pred_rows), use_container_width=True)
+
+        trained_model_id = st.session_state.get("trained_model_id")
+        if trained_model_id:
+            st.divider()
+            st.markdown("#### Run Additional Predictions")
+            default_indices = test_rows["image_index"].tolist()
+            prediction_indices = st.multiselect(
+                "Select images for inference",
+                options=list(range(len(images))),
+                default=default_indices,
+                format_func=lambda x: f"Image {x+1}",
+                key="prediction_indices",
+            )
+            include_probs = st.checkbox(
+                "Return probabilities for inference",
+                value=True,
+                key="prediction_return_probabilities",
+            )
+
+            if st.button("Predict with trained model", key="predict_with_trained_model"):
+                if not prediction_indices:
+                    st.warning("Select at least one image to run predictions.")
+                else:
+                    samples_payload = []
+                    for idx in prediction_indices:
+                        sample = {"image_index": int(idx)}
+                        match = classifier_table[classifier_table["image_index"] == idx]
+                        if not match.empty:
+                            label_value = str(match.iloc[0]["label"]).strip()
+                            if label_value:
+                                sample["label"] = label_value
+                        samples_payload.append(sample)
+
+                    predict_payload = {
+                        "model_id": trained_model_id,
+                        "samples": samples_payload,
+                        "return_probabilities": bool(include_probs),
+                    }
+
+                    try:
+                        with st.spinner("Running inference..."):
+                            prediction_result = predict_classifier(predict_payload)
+                        st.session_state["latest_prediction_result"] = prediction_result
+                        st.success("Predictions generated.")
+                    except Exception as e:
+                        error_msg = str(e)
+                        response_obj = getattr(e, "response", None)
+                        if response_obj is not None:
+                            try:
+                                error_msg = response_obj.json().get("detail", error_msg)
+                            except Exception:
+                                pass
+                        st.error(f"Prediction failed: {error_msg}")
+
+        latest_prediction = st.session_state.get("latest_prediction_result")
+        if latest_prediction:
+            st.markdown("#### Prediction Results")
+            st.write(f"Model ID: `{latest_prediction.get('model_id')}`")
+            prediction_rows = []
+            for entry in latest_prediction.get("predictions", []):
+                prediction_rows.append(
+                    {
+                        "Image": f"Image {int(entry.get('image_index', -1)) + 1}",
+                        "Image ID": entry.get("image_id", ""),
+                        "Prediction": entry.get("prediction", ""),
+                        "Probabilities": _probabilities_to_string(entry.get("probabilities")),
+                        "Actual Label": entry.get("actual_label") or "",
+                    }
+                )
+            if prediction_rows:
+                st.dataframe(pd.DataFrame(prediction_rows), use_container_width=True)
+            _render_metrics_section(latest_prediction.get("metrics"), "Prediction Metrics")
 
 
 # ---------- Utility ----------

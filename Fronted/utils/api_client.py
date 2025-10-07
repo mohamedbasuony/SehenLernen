@@ -20,6 +20,27 @@ def get_current_image_ids():
     return resp.json().get("image_ids", [])
 
 
+def get_image_by_id(image_id: str) -> Image.Image:
+    """Fetch a single image from backend by its ID and return as PIL Image."""
+    url = f"{_get_base_url()}/upload/image/{image_id}"
+    resp = requests.get(url)
+    resp.raise_for_status()
+    return Image.open(BytesIO(resp.content))
+
+
+def get_all_images() -> list[Image.Image]:
+    """Fetch all images from backend as PIL Image objects."""
+    image_ids = get_current_image_ids()
+    images = []
+    for image_id in image_ids:
+        try:
+            img = get_image_by_id(image_id)
+            images.append(img)
+        except Exception as e:
+            st.warning(f"Failed to fetch image {image_id}: {e}")
+    return images
+
+
 def clear_all_backend_images():
     """Clear all images from the backend storage."""
     url = f"{_get_base_url()}/upload/clear-all-images"
@@ -34,13 +55,15 @@ def clear_all_backend_images():
 def upload_images(image_files=None, zip_file=None):
     # Backend router is mounted under /upload (see Backend/app/main.py)
     url = f"{_get_base_url()}/upload/images"
-    files = {}
+    files = []
 
     if image_files:
-        files.update([("images", (f.name, f.getvalue(), f.type)) for f in image_files])
+        # Add each image as a separate file with the same field name "images"
+        for f in image_files:
+            files.append(("images", (f.name, f.getvalue(), f.type)))
 
     if zip_file:
-        files["zip_file"] = (zip_file.name, zip_file.getvalue(), "application/zip")
+        files.append(("zip_file", (zip_file.name, zip_file.getvalue(), "application/zip")))
 
     if not files:
         raise ValueError("No files provided")

@@ -1,7 +1,7 @@
 # backend/app/routers/data_input.py
 
 from fastapi import APIRouter, UploadFile, Form, File, HTTPException
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, Response
 from typing import List, Optional
 import logging
 import base64
@@ -121,6 +121,19 @@ async def get_current_image_ids():
     except Exception as e:
         logging.exception("Failed to get image IDs")
         raise HTTPException(status_code=500, detail="Failed to retrieve image IDs")
+
+
+@router.get("/image/{image_id}")
+async def get_image(image_id: str):
+    """Get a single image by its ID."""
+    try:
+        image_bytes = data_service.get_image_by_id(image_id)
+        return Response(content=image_bytes, media_type="image/png")
+    except FileNotFoundError:
+        raise HTTPException(status_code=404, detail=f"Image not found: {image_id}")
+    except Exception as e:
+        logging.exception("Failed to retrieve image")
+        raise HTTPException(status_code=500, detail="Failed to retrieve image")
 
 
 @router.delete("/clear-all-images")

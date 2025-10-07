@@ -313,6 +313,16 @@ async def extract_images_from_csv(file: UploadFile) -> dict:
     }
 
 
+def get_image_by_id(image_id: str) -> bytes:
+    """Get image bytes by image ID (filename)."""
+    image_path = IMAGE_DIR / image_id
+    if not image_path.exists() or not image_path.is_file():
+        raise FileNotFoundError(f"Image not found: {image_id}")
+    
+    with open(image_path, "rb") as f:
+        return f.read()
+
+
 def clear_all_images() -> None:
     """Clear all stored images and reset metadata."""
     global metadata_df, image_id_col, col_mapping
