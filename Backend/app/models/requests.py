@@ -1,4 +1,4 @@
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 from typing import List, Dict, Any, Optional, Literal
 
 
@@ -195,6 +195,39 @@ class SimilaritySearchRequest(BaseModel):
     # Histogram parameters
     hist_bins: Optional[int] = Field(default=64, description="Number of bins for color histogram")
     hist_channels: Optional[List[int]] = Field(default=[0, 1, 2], description="Color channels to use for histogram")
+
+
+class AngleComparisonRequest(BaseModel):
+    """
+    Request model for comparing stroke orientations between two images.
+    
+    Either an index or base64 string must be provided for each image.
+    """
+    image_a_index: Optional[int] = Field(default=None, ge=0, description="Index of the first image in dataset")
+    image_b_index: Optional[int] = Field(default=None, ge=0, description="Index of the second image in dataset")
+    image_a_base64: Optional[str] = Field(default=None, description="Base64 encoded data for the first image")
+    image_b_base64: Optional[str] = Field(default=None, description="Base64 encoded data for the second image")
+    
+    resize_dimensions: Optional[List[int]] = Field(
+        default=[256, 256],
+        min_items=2,
+        max_items=2,
+        description="Resize images to [width, height] before orientation analysis"
+    )
+    num_bins: int = Field(default=36, ge=4, le=180, description="Number of orientation bins between 0° and 180°")
+    blur_kernel_size: int = Field(default=5, ge=0, le=31, description="Optional Gaussian blur kernel size (must be odd if >0)")
+    canny_threshold1: int = Field(default=50, ge=0, le=255, description="Lower threshold for Canny edge detection")
+    canny_threshold2: int = Field(default=150, ge=0, le=255, description="Upper threshold for Canny edge detection")
+    gradient_threshold: float = Field(default=0.0, ge=0.0, description="Discard gradients below this magnitude")
+    return_histograms: bool = Field(default=True, description="Include normalized orientation histograms in the response")
+    
+    @model_validator(mode="after")
+    def validate_sources(self) -> "AngleComparisonRequest":
+        if self.image_a_index is None and not self.image_a_base64:
+            raise ValueError("Either image_a_index or image_a_base64 must be provided.")
+        if self.image_b_index is None and not self.image_b_base64:
+            raise ValueError("Either image_b_index or image_b_base64 must be provided.")
+        return self
 
 
 # ---- Classifier training & prediction ----

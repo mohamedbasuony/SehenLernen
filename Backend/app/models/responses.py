@@ -51,6 +51,23 @@ class SimilaritySearchResponse(BaseModel):
     computation_time: Optional[float] = None  # Optional: processing time in seconds
 
 
+class AngleComparisonResponse(BaseModel):
+    """Response model for angle-based orientation comparison between two images."""
+    angle_deviation_score: Optional[float]
+    mean_orientation_a: Optional[float]
+    mean_orientation_b: Optional[float]
+    mean_orientation_difference: Optional[float]
+    dominant_orientation_a: Optional[float]
+    dominant_orientation_b: Optional[float]
+    orientation_histogram_a: Optional[List[float]] = None
+    orientation_histogram_b: Optional[List[float]] = None
+    bin_edges: Optional[List[float]] = None
+    samples_a: int = 0
+    samples_b: int = 0
+    image_a_reference: Optional[str] = None
+    image_b_reference: Optional[str] = None
+
+
 class StatsAnalysisResponse(BaseModel):
     status: str
     input: Dict[str, Any]

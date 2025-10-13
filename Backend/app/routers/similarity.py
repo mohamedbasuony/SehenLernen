@@ -1,13 +1,14 @@
 # backend/app/routers/similarity.py
 
 from fastapi import APIRouter, HTTPException
-from fastapi.responses import JSONResponse
 import logging
-from typing import Dict, Any
+from typing import Optional, Tuple
 
+import numpy as np
+from app.services import data_service
 from app.services.similarity_service import SimilarityService
-from app.models.requests import SimilaritySearchRequest
-from app.models.responses import SimilaritySearchResponse
+from app.models.requests import SimilaritySearchRequest, AngleComparisonRequest
+from app.models.responses import SimilaritySearchResponse, AngleComparisonResponse
 
 router = APIRouter()
 
@@ -70,6 +71,60 @@ async def similarity_search(request: SimilaritySearchRequest):
         raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
         logging.exception("Similarity search failed")
+        raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
+
+
+@router.post("/angle-comparison", response_model=AngleComparisonResponse)
+async def angle_comparison(request: AngleComparisonRequest):
+    """
+    Compare two character or word images by analysing their dominant stroke orientations.
+    Returns an angle deviation score alongside supporting orientation statistics.
+    """
+    try:
+        def load_image(source_index: Optional[int], source_b64: Optional[str], label: str) -> Tuple[np.ndarray, str]:
+            if source_index is not None:
+                image_ids = data_service.get_all_image_ids()
+                if source_index < 0 or source_index >= len(image_ids):
+                    raise ValueError(f"{label} index {source_index} is out of range (0-{len(image_ids) - 1}).")
+                image_id = image_ids[source_index]
+                image_array = SimilarityService._load_image_by_id(image_id)
+                return image_array, image_id
+            if source_b64:
+                image_array = SimilarityService._load_image_from_base64(source_b64)
+                return image_array, f"{label}_upload"
+            raise ValueError(f"{label} image must be provided via index or base64 data.")
+        image_a, image_a_ref = load_image(request.image_a_index, request.image_a_base64, "First")
+        image_b, image_b_ref = load_image(request.image_b_index, request.image_b_base64, "Second")
+        
+        resize_dims = tuple(request.resize_dimensions or [256, 256])
+        result = SimilarityService.compare_angle_orientation(
+            image_a,
+            image_b,
+            resize_dims=resize_dims,
+            num_bins=request.num_bins,
+            blur_kernel_size=request.blur_kernel_size,
+            canny_threshold1=request.canny_threshold1,
+            canny_threshold2=request.canny_threshold2,
+            gradient_threshold=request.gradient_threshold
+        )
+        
+        if not request.return_histograms:
+            result.pop("orientation_histogram_a", None)
+            result.pop("orientation_histogram_b", None)
+            result.pop("bin_edges", None)
+        
+        result.update({
+            "image_a_reference": image_a_ref,
+            "image_b_reference": image_b_ref
+        })
+        
+        return AngleComparisonResponse(**result)
+    
+    except ValueError as e:
+        logging.error(f"Invalid angle comparison request: {e}")
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        logging.exception("Angle comparison failed")
         raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
 
 
@@ -208,5 +263,20 @@ async def get_available_methods():
             "cosine": "Cosine similarity - measures angle between feature vectors",
             "euclidean": "Euclidean distance - measures straight-line distance",
             "manhattan": "Manhattan distance - measures city-block distance"
+        },
+        "specialized_methods": {
+            "angle_orientation": {
+                "endpoint": "/similarity/angle-comparison",
+                "description": "Analyse character stroke directions and return an angle deviation score for two images.",
+                "inputs": [
+                    "First image: index or base64",
+                    "Second image: index or base64"
+                ],
+                "outputs": [
+                    "angle_deviation_score",
+                    "mean_orientation_difference",
+                    "optional histograms"
+                ]
+            }
         }
     }

@@ -174,6 +174,199 @@ class SimilarityService:
         return features
     
     @staticmethod
+    def _compute_axial_mean_orientation(angles_deg: np.ndarray, weights: np.ndarray) -> Optional[float]:
+        """
+        Compute the mean orientation for axial (0-180°) data using circular statistics.
+        Returns None if angles cannot be determined (e.g., empty input).
+        """
+        if angles_deg.size == 0 or weights.size == 0:
+            return None
+        
+        # Double the angles for axial data (periodicity of 180°) before averaging
+        doubled_angles_rad = np.deg2rad(angles_deg) * 2.0
+        weighted_sin = np.sum(np.sin(doubled_angles_rad) * weights)
+        weighted_cos = np.sum(np.cos(doubled_angles_rad) * weights)
+        
+        if np.isclose(weighted_sin, 0.0) and np.isclose(weighted_cos, 0.0):
+            return None
+        
+        mean_angle_rad = 0.5 * np.arctan2(weighted_sin, weighted_cos)
+        mean_angle_deg = np.rad2deg(mean_angle_rad) % 180.0
+        return float(mean_angle_deg)
+    
+    @staticmethod
+    def _angular_difference(angle_a: Optional[float], angle_b: Optional[float]) -> Optional[float]:
+        """Return the smallest difference between two orientations, accounting for axial symmetry."""
+        if angle_a is None or angle_b is None:
+            return None
+        diff = abs(angle_a - angle_b)
+        # Axial data repeats every 180°
+        if diff > 90.0:
+            diff = 180.0 - diff
+        return float(diff)
+    
+    @staticmethod
+    def extract_angle_orientation_features(
+        image: np.ndarray,
+        resize_dims: Tuple[int, int] = (256, 256),
+        num_bins: int = 36,
+        blur_kernel_size: int = 5,
+        canny_threshold1: int = 50,
+        canny_threshold2: int = 150,
+        gradient_threshold: float = 0.0
+    ) -> Dict[str, Any]:
+        """
+        Extract orientation features from an image by analysing gradient directions along prominent strokes.
+        
+        Returns a dictionary containing:
+            - histogram: normalized orientation histogram (numpy array)
+            - bin_edges: histogram bin edges (numpy array)
+            - mean_orientation: weighted axial mean orientation in degrees
+            - dominant_orientation: orientation of the most populated bin
+            - sample_count: number of pixels contributing to the histogram
+        """
+        # Resize and convert to grayscale
+        image_resized = SimilarityService._resize_image(image, resize_dims)
+        if len(image_resized.shape) == 3:
+            gray = cv2.cvtColor(image_resized, cv2.COLOR_RGB2GRAY)
+        else:
+            gray = image_resized
+        
+        # Optionally smooth noise
+        if blur_kernel_size and blur_kernel_size > 1:
+            # Kernel size must be odd for Gaussian blur
+            if blur_kernel_size % 2 == 0:
+                blur_kernel_size += 1
+            gray_blurred = cv2.GaussianBlur(gray, (blur_kernel_size, blur_kernel_size), 0)
+        else:
+            gray_blurred = gray
+        
+        # Detect edges and gradients
+        edges = cv2.Canny(gray_blurred, canny_threshold1, canny_threshold2)
+        sobel_x = cv2.Sobel(gray_blurred, cv2.CV_64F, 1, 0, ksize=3)
+        sobel_y = cv2.Sobel(gray_blurred, cv2.CV_64F, 0, 1, ksize=3)
+        
+        magnitude = np.sqrt(sobel_x ** 2 + sobel_y ** 2)
+        angles = np.rad2deg(np.arctan2(sobel_y, sobel_x)) % 180.0  # Orientation is axial
+        
+        # Focus on edge pixels with meaningful gradient magnitude
+        mask = edges > 0
+        if gradient_threshold > 0.0:
+            mask = np.logical_and(mask, magnitude > gradient_threshold)
+        else:
+            mask = np.logical_and(mask, magnitude > 0.0)
+        
+        masked_angles = angles[mask]
+        masked_magnitudes = magnitude[mask]
+        sample_count = int(masked_angles.size)
+        
+        if sample_count == 0:
+            return {
+                "histogram": np.zeros(num_bins, dtype=np.float32),
+                "bin_edges": np.linspace(0.0, 180.0, num_bins + 1, dtype=np.float32),
+                "mean_orientation": None,
+                "dominant_orientation": None,
+                "sample_count": 0
+            }
+        
+        hist, bin_edges = np.histogram(
+            masked_angles,
+            bins=num_bins,
+            range=(0.0, 180.0),
+            weights=masked_magnitudes
+        )
+        hist = hist.astype(np.float64)
+        hist_sum = hist.sum()
+        if hist_sum > 0:
+            hist_normalized = (hist / hist_sum).astype(np.float32)
+        else:
+            hist_normalized = np.zeros_like(hist, dtype=np.float32)
+        
+        bin_centers = (bin_edges[:-1] + bin_edges[1:]) * 0.5
+        dominant_idx = int(np.argmax(hist_normalized)) if hist_normalized.size else 0
+        dominant_orientation = float(bin_centers[dominant_idx]) if hist_sum > 0 else None
+        
+        mean_orientation = SimilarityService._compute_axial_mean_orientation(
+            masked_angles,
+            masked_magnitudes
+        )
+        
+        return {
+            "histogram": hist_normalized,
+            "bin_edges": bin_edges.astype(np.float32),
+            "mean_orientation": mean_orientation,
+            "dominant_orientation": dominant_orientation,
+            "sample_count": sample_count
+        }
+    
+    @staticmethod
+    def compare_angle_orientation(
+        image_a: np.ndarray,
+        image_b: np.ndarray,
+        resize_dims: Tuple[int, int] = (256, 256),
+        num_bins: int = 36,
+        blur_kernel_size: int = 5,
+        canny_threshold1: int = 50,
+        canny_threshold2: int = 150,
+        gradient_threshold: float = 0.0
+    ) -> Dict[str, Any]:
+        """
+        Compare orientation distributions between two images and compute a deviation score.
+        
+        Returns:
+            Dict with angle_deviation_score (0-1, higher means larger deviation) and
+            supporting statistics for each image.
+        """
+        features_a = SimilarityService.extract_angle_orientation_features(
+            image_a,
+            resize_dims=resize_dims,
+            num_bins=num_bins,
+            blur_kernel_size=blur_kernel_size,
+            canny_threshold1=canny_threshold1,
+            canny_threshold2=canny_threshold2,
+            gradient_threshold=gradient_threshold
+        )
+        features_b = SimilarityService.extract_angle_orientation_features(
+            image_b,
+            resize_dims=resize_dims,
+            num_bins=num_bins,
+            blur_kernel_size=blur_kernel_size,
+            canny_threshold1=canny_threshold1,
+            canny_threshold2=canny_threshold2,
+            gradient_threshold=gradient_threshold
+        )
+        
+        hist_a = features_a["histogram"]
+        hist_b = features_b["histogram"]
+        samples_a = features_a.get("sample_count", 0)
+        samples_b = features_b.get("sample_count", 0)
+        
+        if samples_a == 0 or samples_b == 0:
+            angle_deviation = None
+        else:
+            # L1 distance between normalized histograms, scaled to 0-1
+            angle_deviation = float(np.clip(np.sum(np.abs(hist_a - hist_b)) * 0.5, 0.0, 1.0))
+        
+        mean_diff = SimilarityService._angular_difference(
+            features_a.get("mean_orientation"),
+            features_b.get("mean_orientation")
+        )
+        
+        return {
+            "angle_deviation_score": angle_deviation,
+            "mean_orientation_a": features_a.get("mean_orientation"),
+            "mean_orientation_b": features_b.get("mean_orientation"),
+            "mean_orientation_difference": mean_diff,
+            "dominant_orientation_a": features_a.get("dominant_orientation"),
+            "dominant_orientation_b": features_b.get("dominant_orientation"),
+            "orientation_histogram_a": hist_a.tolist() if hist_a is not None else None,
+            "orientation_histogram_b": hist_b.tolist() if hist_b is not None else None,
+            "bin_edges": features_a.get("bin_edges").tolist() if features_a.get("bin_edges") is not None else None,
+            "samples_a": samples_a,
+            "samples_b": samples_b
+        }
+    
+    @staticmethod
     def extract_features(
         image: np.ndarray,
         method: str = "CNN",
