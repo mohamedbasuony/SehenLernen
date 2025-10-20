@@ -24,8 +24,6 @@ if "images" not in st.session_state:
     st.session_state["images"] = []
 if "uploaded_image_ids" not in st.session_state:
     st.session_state["uploaded_image_ids"] = []
-if "current_view" not in st.session_state:
-    st.session_state["current_view"] = "data_input"
 
 # --- SIDEBAR (only show when main app is active) ---
 if st.session_state["show_main_app"]:
@@ -36,6 +34,12 @@ if st.session_state["show_main_app"]:
             st.image(str(logo_path), width=80)
         else:
             st.markdown("### Sehen Lernen")
+        
+        st.markdown("---")
+        
+        # Navigation
+        st.subheader("Navigation")
+        section = st.radio("Go to:", ["Data Input", "Feature Selection"], key="nav_section")
         
         st.markdown("---")
         
@@ -59,103 +63,15 @@ if st.session_state["show_main_app"]:
                         new_images.append(img)
                     
                     st.session_state["images"] = new_images
-                    st.session_state["current_view"] = "feature_selection"
-                    # Clear the uploader to prevent re-triggering
-                    if "file_uploader" in st.session_state:
-                        del st.session_state["file_uploader"]
-                    st.rerun()
+                    st.success(f"Loaded {len(new_images)} images")
                 except Exception as e:
                     st.error(f"Error loading images: {e}")
         
         elif upload_method == "Upload ZIP":
-            uploaded_zip = st.file_uploader(
-                "Choose ZIP file", 
-                type=["zip"], 
-                key="zip_uploader"
-            )
-            
-            if uploaded_zip:
-                try:
-                    import zipfile
-                    new_images = []
-                    
-                    with zipfile.ZipFile(io.BytesIO(uploaded_zip.getbuffer())) as zip_file:
-                        for file_name in zip_file.namelist():
-                            if file_name.lower().endswith(('.png', '.jpg', '.jpeg')):
-                                with zip_file.open(file_name) as img_file:
-                                    img = Image.open(img_file)
-                                    new_images.append(img)
-                    
-                    if new_images:
-                        st.session_state["images"] = new_images
-                        st.session_state["current_view"] = "feature_selection"
-                        # Clear the uploader to prevent re-triggering
-                        if "zip_uploader" in st.session_state:
-                            del st.session_state["zip_uploader"]
-                        st.rerun()
-                    else:
-                        st.warning("No valid images found in ZIP file")
-                except Exception as e:
-                    st.error(f"Error processing ZIP file: {e}")
+            st.info("ZIP upload functionality coming soon")
         
         elif upload_method == "Extract from CSV":
-            uploaded_csv = st.file_uploader(
-                "Choose CSV file", 
-                type=["csv"], 
-                key="csv_uploader"
-            )
-            
-            if uploaded_csv:
-                try:
-                    import pandas as pd
-                    import requests
-                    from urllib.parse import urlparse
-                    
-                    df = pd.read_csv(uploaded_csv)
-                    st.write("**CSV Preview:**")
-                    st.dataframe(df.head())
-                    
-                    # Look for image columns
-                    image_columns = [col for col in df.columns if 'image' in col.lower() or 'url' in col.lower() or 'photo' in col.lower()]
-                    
-                    if image_columns:
-                        selected_column = st.selectbox("Select image column:", image_columns)
-                        
-                        if st.button("Extract Images", type="primary"):
-                            new_images = []
-                            progress_bar = st.progress(0)
-                            
-                            for idx, row in df.iterrows():
-                                try:
-                                    image_path = row[selected_column]
-                                    if pd.notna(image_path):
-                                        if urlparse(str(image_path)).scheme in ['http', 'https']:
-                                            # Download from URL
-                                            response = requests.get(str(image_path))
-                                            img = Image.open(io.BytesIO(response.content))
-                                        else:
-                                            # Local file path
-                                            img = Image.open(str(image_path))
-                                        
-                                        new_images.append(img)
-                                        progress_bar.progress((idx + 1) / len(df))
-                                except Exception as e:
-                                    st.warning(f"Could not load image at row {idx}: {e}")
-                            
-                            if new_images:
-                                st.session_state["images"] = new_images
-                                st.session_state["current_view"] = "feature_selection"
-                                # Clear the uploader to prevent re-triggering
-                                if "csv_uploader" in st.session_state:
-                                    del st.session_state["csv_uploader"]
-                                st.rerun()
-                            else:
-                                st.error("No valid images could be extracted from CSV")
-                    else:
-                        st.warning("No image columns detected. Please ensure your CSV has columns containing 'image', 'url', or 'photo' in the name.")
-                        
-                except Exception as e:
-                    st.error(f"Error processing CSV file: {e}")
+            st.info("CSV extraction functionality coming soon")
         
         # Display uploaded images
         if st.session_state["images"]:
@@ -184,7 +100,7 @@ if not st.session_state["show_main_app"]:
         st.markdown("<br>", unsafe_allow_html=True)
         
         # Logo - positioned slightly to the right
-        logo_col1, logo_col2, logo_col3 = st.columns([1.8, 1, 1.5])
+        logo_col1, logo_col2, logo_col3 = st.columns([0.8, 1, 1.2])
         with logo_col2:
             try:
                 st.image("assets/Logo.png", width=120)
@@ -195,8 +111,8 @@ if not st.session_state["show_main_app"]:
         # Thin separator line after logo
         st.markdown("<hr style='border: none; height: 1px; background: linear-gradient(90deg, transparent, #ccc, transparent); margin: 0.8rem 0;'>", unsafe_allow_html=True)
         
-        # Title - larger sizing
-        st.markdown("<h1 style='text-align: center; font-size: 2.5rem; margin-bottom: 0.5rem; font-weight: 600; color: #2c3e50;'>Welcome to Sehen Lernen</h1>", unsafe_allow_html=True)
+        # Title - compact sizing
+        st.markdown("<h1 style='text-align: center; font-size: 2rem; margin-bottom: 0.5rem; font-weight: 600; color: #2c3e50;'>Welcome to Sehen Lernen</h1>", unsafe_allow_html=True)
         
         # Subtitle - compact sizing
         st.markdown("<p style='text-align: center; font-size: 1rem; margin-bottom: 1rem; line-height: 1.4; color: #555; max-width: 450px; margin-left: auto; margin-right: auto;'>Explore the intersection of human and artificial intelligence in visual perception.</p>", unsafe_allow_html=True)
@@ -222,7 +138,8 @@ if not st.session_state["show_main_app"]:
             st.markdown("""
             <div style='text-align: center; padding: 0.5rem;'>
                 <div style='font-size: 2rem; margin-bottom: 0.4rem;'>🔍</div>
-                <h3 style='font-size: 1.3rem; font-weight: 600; margin-bottom: 0.3rem; color: #2c3e50;'>Visual Analysis</h3>
+                <h3 style='font-size: 1rem; font-weight: 600; margin-bottom: 0.3rem; color: #2c3e50;'>Visual Analysis</h3>
+                <p style='font-size: 0.8rem; line-height: 1.3; color: #666; margin: 0;'>Advanced computer vision</p>
             </div>
             """, unsafe_allow_html=True)
             
@@ -230,7 +147,8 @@ if not st.session_state["show_main_app"]:
             st.markdown("""
             <div style='text-align: center; padding: 0.5rem;'>
                 <div style='font-size: 2rem; margin-bottom: 0.4rem;'>🧠</div>
-                <h3 style='font-size: 1.3rem; font-weight: 600; margin-bottom: 0.3rem; color: #2c3e50;'>AI Comparison</h3>
+                <h3 style='font-size: 1rem; font-weight: 600; margin-bottom: 0.3rem; color: #2c3e50;'>AI Comparison</h3>
+                <p style='font-size: 0.8rem; line-height: 1.3; color: #666; margin: 0;'>Human vs AI perception</p>
             </div>
             """, unsafe_allow_html=True)
             
@@ -238,7 +156,8 @@ if not st.session_state["show_main_app"]:
             st.markdown("""
             <div style='text-align: center; padding: 0.5rem;'>
                 <div style='font-size: 2rem; margin-bottom: 0.4rem;'>📊</div>
-                <h3 style='font-size: 1.3rem; font-weight: 600; margin-bottom: 0.3rem; color: #2c3e50;'>Interactive Learning</h3>
+                <h3 style='font-size: 1rem; font-weight: 600; margin-bottom: 0.3rem; color: #2c3e50;'>Interactive Learning</h3>
+                <p style='font-size: 0.8rem; line-height: 1.3; color: #666; margin: 0;'>Hands-on exploration</p>
             </div>
             """, unsafe_allow_html=True)
     
@@ -292,38 +211,28 @@ if not st.session_state["show_main_app"]:
     
 else:
     # Main application content when sidebar is shown
-    current_view = st.session_state.get("current_view", "data_input")
+    st.title("🔍 Data Analysis Platform")
     
-    if current_view == "feature_selection" and st.session_state["images"]:
-        # Import and render the original feature selection component
-        from components.feature_selection import render_feature_selection
-        render_feature_selection()
+    if st.session_state["images"]:
+        st.success(f"✅ {len(st.session_state['images'])} images ready for analysis")
+        
+        # Display images in a grid
+        cols = st.columns(4)
+        for i, img in enumerate(st.session_state["images"]):
+            with cols[i % 4]:
+                st.image(img, caption=f"Image {i+1}", use_container_width=True)
+        
+        # Add analysis options
+        st.markdown("---")
+        st.subheader("Analysis Options")
+        analysis_type = st.selectbox("Choose analysis:", ["Feature Extraction", "Object Detection", "Similarity Analysis"])
+        
+        if st.button("Run Analysis"):
+            st.info(f"Running {analysis_type}... (Feature coming soon)")
     
     else:
-        # Default data input view
-        st.title("🔍 Data Analysis Platform")
+        st.info("👈 Use the sidebar to upload images to get started")
         
-        if st.session_state["images"]:
-            st.success(f"✅ {len(st.session_state['images'])} images ready for analysis")
-            
-            # Display images in a grid
-            cols = st.columns(4)
-            for i, img in enumerate(st.session_state["images"]):
-                with cols[i % 4]:
-                    st.image(img, caption=f"Image {i+1}", use_container_width=True)
-            
-            # Add analysis options
-            st.markdown("---")
-            st.subheader("Analysis Options")
-            analysis_type = st.selectbox("Choose analysis:", ["Feature Extraction", "Object Detection", "Similarity Analysis"])
-            
-            if st.button("Run Analysis"):
-                st.session_state["current_view"] = "feature_selection"
-                st.rerun()
-        
-        else:
-            st.info("👈 Use the sidebar to upload images to get started")
-            
-            # Show sample images or demo
-            st.markdown("### Welcome to Sehen Lernen")
-            st.write("Upload images using the sidebar to begin your visual perception analysis journey.")
+        # Show sample images or demo
+        st.markdown("### Welcome to Sehen Lernen")
+        st.write("Upload images using the sidebar to begin your visual perception analysis journey.")
