@@ -33,6 +33,7 @@ from app.models.requests import (
     EdgeResponse,                       # (imported for consistency; response returned as dict)
     ClassifierTrainingRequest,
     ClassifierPredictionRequest,
+    CooccurrenceRequest,               # simple co-occurrence texture request
 )
 
 router = APIRouter()
@@ -154,7 +155,7 @@ async def haralick(
 
 
 @router.post("/cooccurrence")
-def cooccurrence(request: ShapeRequest):
+def cooccurrence(request: CooccurrenceRequest):
     """
     Extract gray-level co-occurrence features from a single image (fixed params).
     """

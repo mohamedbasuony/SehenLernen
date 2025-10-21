@@ -298,3 +298,10 @@ class ClassifierPredictionRequest(BaseModel):
         description="Optional feature vectors aligned with samples (bypass image-based extraction)",
     )
     return_probabilities: bool = True
+
+
+class CooccurrenceRequest(BaseModel):
+    """
+    Simple request for co-occurrence texture feature extraction.
+    """
+    image_index: int = Field(..., description="Zero-based index of the image to analyze")
