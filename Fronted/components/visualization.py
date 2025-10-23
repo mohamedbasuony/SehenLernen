@@ -2,7 +2,7 @@ import streamlit as st
 
 # Visualization page component
 def render_visualization():
-    st.header("Visualization")
+    st.markdown("<h1 style='text-align: center; font-size: 2.2rem; margin-bottom: 1.5rem; color: #2c3e50;'>Visualization</h1>", unsafe_allow_html=True)
 
     # Ensure reduced embeddings and labels available
     if not st.session_state.get("reduced_features") or not st.session_state.get("feature_labels"):

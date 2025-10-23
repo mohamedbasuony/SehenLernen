@@ -1,4 +1,5 @@
 import io
+from io import StringIO
 import base64
 import uuid
 import numpy as np
@@ -156,6 +157,86 @@ def perform_kmeans_service(
     return plot_b64, labels.tolist()
 
 
+def perform_single_image_kmeans_service(
+    image_index: int,
+    n_clusters: int,
+    random_state: int,
+    max_pixels: int = 10000
+) -> tuple[str, str]:
+    """
+    Perform K-means clustering on pixels within a single image to segment by color.
+    Returns (segmented_image_base64, original_vs_segmented_plot_base64).
+    """
+    img_ids = get_all_image_ids()
+    if not img_ids or image_index < 0 or image_index >= len(img_ids):
+        raise Exception("Invalid image index")
+
+    img_bytes = load_image(img_ids[image_index])
+    img = Image.open(io.BytesIO(img_bytes)).convert('RGB')
+    img_array = np.array(img)
+    
+    # Reshape image to be a list of pixels
+    original_shape = img_array.shape
+    pixels = img_array.reshape(-1, 3)  # Reshape to (num_pixels, 3)
+    
+    # Sample pixels if the image is too large for performance
+    if len(pixels) > max_pixels:
+        indices = np.random.RandomState(random_state).choice(len(pixels), max_pixels, replace=False)
+        sampled_pixels = pixels[indices]
+    else:
+        sampled_pixels = pixels
+        indices = np.arange(len(pixels))
+    
+    # Perform K-means clustering on the pixels
+    kmeans = KMeans(n_clusters=n_clusters, random_state=random_state, n_init=10)
+    cluster_labels = kmeans.fit_predict(sampled_pixels)
+    
+    # Create segmented image by replacing each pixel with its cluster center color
+    segmented_pixels = np.zeros_like(pixels, dtype=np.uint8)
+    
+    if len(pixels) > max_pixels:
+        # For sampled approach: predict all pixels using the trained model
+        all_cluster_labels = kmeans.predict(pixels)
+        for i, center in enumerate(kmeans.cluster_centers_):
+            segmented_pixels[all_cluster_labels == i] = center.astype(np.uint8)
+    else:
+        # For all pixels approach
+        for i, center in enumerate(kmeans.cluster_centers_):
+            segmented_pixels[cluster_labels == i] = center.astype(np.uint8)
+    
+    # Reshape back to original image shape
+    segmented_image = segmented_pixels.reshape(original_shape)
+    
+    # Create comparison plot
+    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(12, 6))
+    
+    # Original image
+    ax1.imshow(img_array)
+    ax1.set_title('Original Image')
+    ax1.axis('off')
+    
+    # Segmented image
+    ax2.imshow(segmented_image)
+    ax2.set_title(f'K-means Segmentation (k={n_clusters})')
+    ax2.axis('off')
+    
+    plt.tight_layout()
+    
+    # Save comparison plot
+    buf_plot = io.BytesIO()
+    fig.savefig(buf_plot, format='png', dpi=150, bbox_inches='tight')
+    plt.close(fig)
+    plot_b64 = base64.b64encode(buf_plot.getvalue()).decode()
+    
+    # Save segmented image
+    segmented_pil = Image.fromarray(segmented_image)
+    buf_img = io.BytesIO()
+    segmented_pil.save(buf_img, format='PNG')
+    segmented_b64 = base64.b64encode(buf_img.getvalue()).decode()
+    
+    return segmented_b64, plot_b64
+
+
 # --------------------------
 # Shape features (HOG / SIFT / FAST)
 # --------------------------
@@ -258,8 +339,10 @@ def extract_shape_service(
 
     elif method == "SIFT":
         img_gray = img.convert('L')
+        # Convert PIL Image to numpy array before resizing
+        arr = np.array(img_gray)
         # sk_resize returns a float image in [0,1]; convert to uint8 for OpenCV
-        arr = (sk_resize(img_gray, (256, 256)) * 255).astype('uint8')
+        arr = (sk_resize(arr, (256, 256)) * 255).astype('uint8')
         sift = cv2.SIFT_create()
         kp, des = sift.detectAndCompute(arr, None)
         features = des.tolist() if des is not None else []
@@ -473,28 +556,139 @@ def extract_edges_service(
 # Legacy Haralick
 # --------------------------
 async def extract_haralick_service(train_images: list, train_labels: UploadFile, test_images: list) -> tuple[list, list]:
-    X_train = []
-    for f in train_images:
-        data = await f.read()
-        img = Image.open(io.BytesIO(data)).convert('L')
-        arr = np.array(img)
-        gm = greycomatrix(arr, distances=[1], angles=[0], levels=256, symmetric=True, normed=True)
-        props = greycoprops(gm, 'contrast')[0, 0]
-        X_train.append([props])
-    labels_df = pd.read_csv(train_labels.file)
-    y_train = labels_df.iloc[:, 0].tolist()
-    from sklearn.ensemble import RandomForestClassifier
-    clf = RandomForestClassifier(random_state=42).fit(X_train, y_train)
-    X_test = []
-    for f in test_images:
-        data = await f.read()
-        img = Image.open(io.BytesIO(data)).convert('L')
-        arr = np.array(img)
-        gm = greycomatrix(arr, distances=[1], angles=[0], levels=256, symmetric=True, normed=True)
-        props = greycoprops(gm, 'contrast')[0, 0]
-        X_test.append([props])
-    preds = clf.predict(X_test).tolist()
-    return y_train, preds
+    """
+    Train a classifier using Haralick texture features from training images,
+    then predict labels for test images using their actual filenames.
+    """
+    import logging
+    
+    try:
+        logging.info(f"Starting Haralick service with {len(train_images)} training images and {len(test_images)} test images")
+        
+        # Extract features from training images
+        X_train = []
+        train_filenames = []
+        
+        for f in train_images:
+            try:
+                data = await f.read()
+                img = Image.open(io.BytesIO(data)).convert('L')
+                arr = np.array(img)
+                
+                # Normalize the image to ensure pixel values are within the levels range
+                # Scale to 0-63 range for levels=64
+                levels = 64
+                logging.info(f"Training image {f.filename} - min: {arr.min()}, max: {arr.max()}, shape: {arr.shape}")
+                arr = ((arr.astype(np.float32) / 255.0) * (levels - 1)).astype(np.uint8)
+                logging.info(f"Normalized training image {f.filename} - min: {arr.min()}, max: {arr.max()}")
+                
+                # Use multiple distances and angles for better feature extraction
+                distances = [1, 2, 3]
+                angles = [0, np.pi/4, np.pi/2, 3*np.pi/4]
+                
+                # Compute GLCM with multiple parameters
+                gm = greycomatrix(arr, distances=distances, angles=angles, levels=levels, symmetric=True, normed=True)
+                
+                # Extract multiple Haralick properties for better discrimination
+                features = []
+                properties = ['contrast', 'dissimilarity', 'homogeneity', 'ASM', 'energy', 'correlation']
+                
+                for prop in properties:
+                    # Average over all distance-angle combinations
+                    prop_values = greycoprops(gm, prop)
+                    features.append(np.mean(prop_values))
+                
+                X_train.append(features)
+                train_filenames.append(f.filename)
+                logging.info(f"Processed training image: {f.filename}")
+                
+            except Exception as e:
+                logging.error(f"Error processing training image {f.filename}: {e}")
+                raise
+        
+        # Load training labels from CSV
+        try:
+            # Reset file pointer to beginning
+            train_labels.file.seek(0)
+            labels_content = await train_labels.read()
+            labels_df = pd.read_csv(StringIO(labels_content.decode('utf-8')))
+            logging.info(f"Loaded labels CSV with shape: {labels_df.shape}")
+            logging.info(f"CSV columns: {labels_df.columns.tolist()}")
+            logging.info(f"CSV content:\n{labels_df.head()}")
+        except Exception as e:
+            logging.error(f"Error loading labels CSV: {e}")
+            raise
+        
+        # Handle different CSV formats
+        if labels_df.shape[1] >= 2:
+            # Assume first column is filename, second is label
+            filename_to_label = dict(zip(labels_df.iloc[:, 0], labels_df.iloc[:, 1]))
+            y_train = [filename_to_label.get(fname, "unknown") for fname in train_filenames]
+        else:
+            # Single column - assume labels in order
+            y_train = labels_df.iloc[:, 0].tolist()
+        
+        logging.info(f"Training labels: {y_train}")
+        
+        # Train classifier
+        from sklearn.ensemble import RandomForestClassifier
+        clf = RandomForestClassifier(random_state=42, n_estimators=100)
+        clf.fit(X_train, y_train)
+        logging.info("Classifier trained successfully")
+        
+        # Extract features from test images and predict
+        X_test = []
+        test_filenames = []
+        
+        for i, f in enumerate(test_images):
+            try:
+                data = await f.read()
+                img = Image.open(io.BytesIO(data)).convert('L')
+                arr = np.array(img)
+                
+                # Normalize the image to ensure pixel values are within the levels range
+                # Scale to 0-63 range for levels=64
+                levels = 64
+                logging.info(f"Test image {f.filename} - min: {arr.min()}, max: {arr.max()}, shape: {arr.shape}")
+                arr = ((arr.astype(np.float32) / 255.0) * (levels - 1)).astype(np.uint8)
+                logging.info(f"Normalized test image {f.filename} - min: {arr.min()}, max: {arr.max()}")
+                
+                # Use same parameters as training
+                distances = [1, 2, 3]
+                angles = [0, np.pi/4, np.pi/2, 3*np.pi/4]
+                
+                # Compute GLCM with multiple parameters
+                gm = greycomatrix(arr, distances=distances, angles=angles, levels=levels, symmetric=True, normed=True)
+                
+                # Extract same features as training
+                features = []
+                properties = ['contrast', 'dissimilarity', 'homogeneity', 'ASM', 'energy', 'correlation']
+                
+                for prop in properties:
+                    # Average over all distance-angle combinations
+                    prop_values = greycoprops(gm, prop)
+                    features.append(np.mean(prop_values))
+                
+                X_test.append(features)
+                test_filenames.append(f.filename)
+                logging.info(f"Processed test image: {f.filename}")
+                
+            except Exception as e:
+                logging.error(f"Error processing test image {f.filename}: {e}")
+                raise
+        
+        # Make predictions
+        predictions_with_names = []
+        if X_test:
+            preds = clf.predict(X_test)
+            predictions_with_names = [f"{test_filenames[i]}: {pred}" for i, pred in enumerate(preds)]
+            logging.info(f"Predictions: {predictions_with_names}")
+        
+        return y_train, predictions_with_names
+        
+    except Exception as e:
+        logging.error(f"Overall error in Haralick service: {e}")
+        raise
 
 
 # --------------------------

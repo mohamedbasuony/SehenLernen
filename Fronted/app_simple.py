@@ -34,7 +34,7 @@ if st.session_state["show_sidebar"]:
             st.subheader(f"Images ({len(st.session_state['images'])})")
             for i, img in enumerate(st.session_state["images"]):
                 with st.expander(f"Image {i+1}"):
-                    st.image(img, use_container_width=True)
+                    st.image(img, width='stretch')
         
         if st.button("Back to Home"):
             st.session_state["show_sidebar"] = False
@@ -63,6 +63,6 @@ else:
         cols = st.columns(4)
         for i, img in enumerate(st.session_state["images"]):
             with cols[i % 4]:
-                st.image(img, caption=f"Image {i+1}", use_container_width=True)
+                st.image(img, caption=f"Image {i+1}", width='stretch')
     else:
         st.info("👈 Use the sidebar to upload images")

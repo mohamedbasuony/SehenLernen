@@ -93,7 +93,7 @@ def render_sidebar():
             )
 
             if zip_file:
-                if st.button("Upload ZIP", key="sidebar_btn_upload_zip", use_container_width=True):
+                if st.button("Upload ZIP", key="sidebar_btn_upload_zip", width='stretch'):
                     with st.spinner("Uploading ZIP..."):
                         try:
                             image_ids = api_client.upload_images(None, zip_file)
@@ -120,7 +120,7 @@ def render_sidebar():
             )
 
             if csv_file:
-                if st.button("Extract Images", key="sidebar_btn_extract_csv", use_container_width=True):
+                if st.button("Extract Images", key="sidebar_btn_extract_csv", width='stretch'):
                     with st.spinner("Extracting images from URLs..."):
                         try:
                             zip_bytes, image_ids, errors = api_client.extract_images_from_csv(csv_file)
@@ -183,7 +183,7 @@ def render_sidebar():
                 with st.container():
                     top = st.columns([6, 1])
                     with top[0]:
-                        st.image(img, use_container_width=True)
+                        st.image(img, width='stretch')
                     with top[1]:
                         if st.button("✖", key=f"sidebar_remove_{i}", help="Remove this image"):
                             try:

@@ -139,6 +139,37 @@ def perform_kmeans(params):
         raise
 
 
+def perform_single_image_kmeans(params):
+    """
+    Perform K-means clustering on pixels within a single image.
+    
+    params should contain:
+    - image_index: int
+    - n_clusters: int
+    - random_state: int (optional, default 42)
+    - max_pixels: int (optional, default 10000)
+    
+    Returns (segmented_image_bytes, comparison_plot_bytes)
+    """
+    url = f"{_get_base_url()}/features/kmeans-single-image"
+    resp = requests.post(url, json=params)
+    try:
+        resp.raise_for_status()
+        data = resp.json()
+        segmented_bytes = base64.b64decode(data.get("segmented_image", ""))
+        plot_bytes = base64.b64decode(data.get("comparison_plot", ""))
+        return segmented_bytes, plot_bytes
+    except requests.exceptions.HTTPError:
+        if resp.status_code == 500:
+            try:
+                error_data = resp.json()
+                error_detail = error_data.get("detail", "Internal server error")
+            except Exception:
+                error_detail = "Internal server error"
+            st.error(f"Server error: {error_detail}")
+        raise
+
+
 def extract_shape_features(params):
     """
     Generic shape/feature call (HOG/SIFT/FAST).
@@ -185,13 +216,6 @@ def extract_haralick_texture(params):
     resp.raise_for_status()
     data = resp.json()
     return data.get("labels", []), data.get("predictions", [])
-
-
-def extract_cooccurrence_texture(params):
-    url = f"{_get_base_url()}/features/cooccurrence"
-    resp = requests.post(url, json=params)
-    resp.raise_for_status()
-    return resp.json().get("features", [])
 
 
 # -----------------------------

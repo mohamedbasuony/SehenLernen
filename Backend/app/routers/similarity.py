@@ -251,13 +251,14 @@ async def get_cache_stats():
 async def get_available_methods():
     """Get list of available feature extraction methods and distance metrics."""
     return {
-        "feature_methods": ["CNN", "HOG", "SIFT", "histogram"],
+        "feature_methods": ["CNN", "HOG", "SIFT", "histogram", "manuscript"],
         "distance_metrics": ["cosine", "euclidean", "manhattan"],
         "method_descriptions": {
             "CNN": "Convolutional Neural Network-like features using statistical patches",
             "HOG": "Histogram of Oriented Gradients - good for shape and texture",
             "SIFT": "Scale-Invariant Feature Transform - robust to scale and rotation",
-            "histogram": "Color histogram features - good for color-based similarity"
+            "histogram": "Color histogram features - good for color-based similarity",
+            "manuscript": "⭐ OPTIMIZED FOR MANUSCRIPTS: Multi-scale texture, script patterns, layout analysis"
         },
         "metric_descriptions": {
             "cosine": "Cosine similarity - measures angle between feature vectors",

@@ -6,9 +6,63 @@ from components.data_input import render_data_input
 from components.feature_selection import render_feature_selection
 from components.stats_analysis import render_stats_analysis
 from components.visualization import render_visualization
+from components.seher_smart_chat import render_smart_chat, update_chat_context, add_chat_message
 
 # --- Page Configuration ---
 st.set_page_config(page_title="Sehen Lernen", layout="wide")
+
+# --- Custom Button Styling ---
+st.markdown("""
+<style>
+    /* Style all buttons with the specified background color */
+    .stButton > button {
+        background-color: #F4F4F4 !important;
+        color: #333333 !important;
+        border: 1px solid #CCCCCC !important;
+        border-radius: 6px !important;
+        padding: 0.5rem 1rem !important;
+        font-weight: 500 !important;
+        transition: all 0.3s ease !important;
+    }
+    
+    .stButton > button:hover {
+        background-color: #E8E8E8 !important;
+        border-color: #AAAAAA !important;
+        transform: translateY(-1px) !important;
+        box-shadow: 0 2px 4px rgba(0,0,0,0.1) !important;
+    }
+    
+    .stButton > button:active {
+        background-color: #DDDDDD !important;
+        transform: translateY(0px) !important;
+    }
+    
+    /* Primary buttons */
+    .stButton > button[kind="primary"] {
+        background-color: #F4F4F4 !important;
+        color: #2c3e50 !important;
+        font-weight: 600 !important;
+        border: 2px solid #2c3e50 !important;
+    }
+    
+    .stButton > button[kind="primary"]:hover {
+        background-color: #E8E8E8 !important;
+        border-color: #1a252f !important;
+    }
+    
+    /* Radio buttons and checkboxes styling */
+    .stRadio > div, .stCheckbox > div {
+        text-align: center !important;
+    }
+    
+    /* Selectbox styling */
+    .stSelectbox > div > div {
+        text-align: center !important;
+    }
+    
+    /* Keep form elements naturally aligned - don't force center */
+</style>
+""", unsafe_allow_html=True)
 
 APP_ROOT = Path(__file__).resolve().parent
 
@@ -64,7 +118,7 @@ def _render_landing() -> None:
 
         b1, b2, b3 = st.columns([1, 1, 1])
         with b2:
-            if st.button("🚀 Start Learning", key="start_button", use_container_width=True,
+            if st.button("🚀 Start Learning", key="start_button", width='stretch',
                          help="Begin your visual learning journey"):
                 st.session_state["show_main_app"] = True
                 st.session_state["active_section"] = "Data Input"  # take users to uploads first
@@ -162,18 +216,28 @@ def _render_main() -> None:
     section = st.session_state.get("active_section", "Feature Selection")
     if section == "Home":
         # Show features page; it will prompt to upload if empty
+        update_chat_context("general")
         render_feature_selection()
     elif section == "Data Input":
         # Route Data Input to Feature Selection view; uploads live in the sidebar now
+        update_chat_context("general")
         render_feature_selection()
     elif section == "Feature Selection":
+        update_chat_context("general")
         render_feature_selection()
     elif section == "Statistics Analysis":
+        update_chat_context("stats")
         render_stats_analysis()
     elif section == "Visualization":
+        update_chat_context("visualization")
         render_visualization()
     else:
         st.error(f"Unknown section: {section}")
+    
+    # Always render the chat island (it will float independently)
+    # Position it at the bottom right of the screen
+    with st.container():
+        render_smart_chat()
 
 
 # --- Render ---

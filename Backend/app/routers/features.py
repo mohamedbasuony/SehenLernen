@@ -11,9 +11,9 @@ from pydantic import BaseModel
 from app.services.feature_service import (
     generate_histogram_service,
     perform_kmeans_service,
+    perform_single_image_kmeans_service,
     extract_shape_service,
     extract_haralick_service,          # legacy train/predict demo (multipart)
-    extract_cooccurrence_service,
     extract_haralick_features_service,  # table-style Haralick extraction
     compute_lbp_service,                # LBP service
     extract_contours_service,           # Contour extraction
@@ -33,7 +33,6 @@ from app.models.requests import (
     EdgeResponse,                       # (imported for consistency; response returned as dict)
     ClassifierTrainingRequest,
     ClassifierPredictionRequest,
-    CooccurrenceRequest,               # simple co-occurrence texture request
 )
 
 router = APIRouter()
@@ -51,6 +50,13 @@ class KMeansRequest(BaseModel):
     random_state: int
     selected_images: List[int] = []
     use_all_images: bool = False
+
+
+class SingleImageKMeansRequest(BaseModel):
+    image_index: int
+    n_clusters: int
+    random_state: int = 42
+    max_pixels: int = 10000
 
 
 # -------------------------------
@@ -91,6 +97,24 @@ def kmeans(request: KMeansRequest):
         return {"plot": plot_b64, "assignments": assignments}
     except Exception as e:
         logging.exception("Failed to do the clustering K-means")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/kmeans-single-image")
+def kmeans_single_image(request: SingleImageKMeansRequest):
+    """
+    Perform K-means clustering on pixels within a single image to segment by color.
+    """
+    try:
+        segmented_b64, plot_b64 = perform_single_image_kmeans_service(
+            image_index=request.image_index,
+            n_clusters=request.n_clusters,
+            random_state=request.random_state,
+            max_pixels=request.max_pixels
+        )
+        return {"segmented_image": segmented_b64, "comparison_plot": plot_b64}
+    except Exception as e:
+        logging.exception("Failed to do single-image K-means clustering")
         raise HTTPException(status_code=500, detail=str(e))
 
 
@@ -152,19 +176,6 @@ async def haralick(
     except Exception:
         logging.exception("Failed to extract Haralick texture features (legacy)")
         raise HTTPException(status_code=500, detail="Internal server error extracting Haralick features")
-
-
-@router.post("/cooccurrence")
-def cooccurrence(request: CooccurrenceRequest):
-    """
-    Extract gray-level co-occurrence features from a single image (fixed params).
-    """
-    try:
-        features = extract_cooccurrence_service(image_index=request.image_index)
-        return {"features": features}
-    except Exception:
-        logging.exception("Failed to extract co-occurrence features")
-        raise HTTPException(status_code=500, detail="Internal server error extracting co-occurrence features")
 
 
 # ---- Haralick extraction (table) ----

@@ -12,8 +12,8 @@ def render_home():
     Team Members: Luana Moraes Costa, Firmin Forster, M. Kipke, Alexander Eric Wilhelm, Alexander Zeckey
     """)
     st.markdown("---")
-    st.header("Welcome to the Sehen Lernen Platform")
-    st.write("Here you can upload, process, and analyze images.")
+    st.markdown("<h1 style='text-align: center; font-size: 2.5rem; margin-bottom: 1rem; color: #2c3e50;'>Welcome to the Sehen Lernen Platform</h1>", unsafe_allow_html=True)
+    st.markdown("<p style='text-align: center; font-size: 1.1rem; margin-bottom: 1rem;'>Here you can upload, process, and analyze images.</p>", unsafe_allow_html=True)
 
     if st.button("Start", key="home_start_button"):
         st.session_state["active_section"] = "Data Input"

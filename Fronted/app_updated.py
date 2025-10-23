@@ -80,11 +80,11 @@ if st.session_state["show_main_app"]:
             
             for i, img in enumerate(st.session_state["images"]):
                 with st.expander(f"Image {i+1}"):
-                    st.image(img, use_container_width=True)
+                    st.image(img, width='stretch')
         
         # Back to Home button
         st.markdown("---")
-        if st.button("🏠 Back to Home", use_container_width=True):
+        if st.button("🏠 Back to Home", width='stretch'):
             st.session_state["show_main_app"] = False
             st.rerun()
 
@@ -123,7 +123,7 @@ if not st.session_state["show_main_app"]:
         # Start button - centered and compact
         start_col1, start_col2, start_col3 = st.columns([1, 1, 1])
         with start_col2:
-            if st.button("🚀 Start Learning", key="start_button", use_container_width=True, 
+            if st.button("🚀 Start Learning", key="start_button", width='stretch', 
                         help="Begin your visual learning journey"):
                 st.session_state["show_main_app"] = True
                 st.rerun()
@@ -220,7 +220,7 @@ else:
         cols = st.columns(4)
         for i, img in enumerate(st.session_state["images"]):
             with cols[i % 4]:
-                st.image(img, caption=f"Image {i+1}", use_container_width=True)
+                st.image(img, caption=f"Image {i+1}", width='stretch')
         
         # Add analysis options
         st.markdown("---")

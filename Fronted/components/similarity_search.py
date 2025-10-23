@@ -38,15 +38,25 @@ def render_similarity_search():
     with st.sidebar:
         st.header("Search Parameters")
         
-        # Feature extraction method
+        # Feature extraction method with manuscript highlight
+        st.markdown("### Feature Extraction Method")
+        
+        # Highlight manuscript method if available
+        if "manuscript" in available_methods:
+            st.success("📜 **RECOMMENDED FOR MANUSCRIPTS**: Use 'manuscript' method for ancient books, handwritten texts, and historical documents!")
+        
         feature_method = st.selectbox(
-            "Feature Extraction Method",
+            "Select Method",
             options=available_methods,
-            help="Method used to extract features from images"
+            help="Method used to extract features from images",
+            index=available_methods.index("manuscript") if "manuscript" in available_methods else 0
         )
         
         if feature_method in method_descriptions:
-            st.info(method_descriptions[feature_method])
+            if feature_method == "manuscript":
+                st.success(method_descriptions[feature_method])
+            else:
+                st.info(method_descriptions[feature_method])
         
         # Distance metric
         distance_metric = st.selectbox(
@@ -59,12 +69,25 @@ def render_similarity_search():
             st.info(metric_descriptions[distance_metric])
         
         # Search parameters
-        max_results = st.slider("Max Results", min_value=1, max_value=50, value=10)
+        max_results = st.slider("Max Results", min_value=1, max_value=50, value=15)
         
-        use_threshold = st.checkbox("Use Similarity Threshold")
+        use_threshold = st.checkbox("Use Similarity Threshold", help="Uncheck to use automatic smart thresholds optimized for each method")
         threshold = None
         if use_threshold:
-            threshold = st.slider("Similarity Threshold", min_value=0.0, max_value=1.0, value=0.5, step=0.01)
+            # Set different default thresholds based on method
+            if feature_method == "manuscript":
+                default_threshold = 0.3
+                st.info("📜 Recommended threshold for manuscripts: 0.2-0.4")
+            elif feature_method == "HOG":
+                default_threshold = 0.4
+            elif feature_method == "SIFT":
+                default_threshold = 0.2
+            else:
+                default_threshold = 0.5
+                
+            threshold = st.slider("Similarity Threshold", min_value=0.0, max_value=1.0, 
+                                value=default_threshold, step=0.01,
+                                help=f"Higher values = more strict matching. Recommended: {default_threshold}")
         
         # Advanced parameters
         with st.expander("Advanced Parameters"):
@@ -111,39 +134,42 @@ def render_similarity_search():
             else:
                 hist_bins = None
                 hist_channels = None
+                
+            if feature_method == "manuscript":
+                st.subheader("📜 Manuscript Analysis Parameters")
+                st.info("Optimized preprocessing for historical documents:")
+                st.markdown("""
+                - ✅ **CLAHE**: Contrast enhancement for faded texts
+                - ✅ **Multi-scale HOG**: Fine & coarse text patterns
+                - ✅ **LBP**: Local texture analysis for script styles
+                - ✅ **Layout analysis**: Line and word structure
+                - ✅ **Edge orientation**: Script direction patterns
+                """)
+                
+                # For manuscript method, resize is optimized
+                if resize_dimensions == [224, 224]:
+                    resize_dimensions = [256, 256]  # Better for manuscript analysis
+                    st.success("Using optimized 256x256 resolution for manuscripts")
         
         # Cache management
         with st.expander("Cache Management"):
-            if st.button("Precompute Features"):
-                with st.spinner("Precomputing features..."):
+            col1, col2 = st.columns(2)
+            
+            with col1:
+                if st.button("Clear Cache"):
                     try:
-                        result = precompute_similarity_features(
-                            feature_method=feature_method,
-                            resize_dimensions=resize_dimensions,
-                            hog_orientations=hog_orientations,
-                            hog_pixels_per_cell=hog_pixels_per_cell,
-                            hog_cells_per_block=hog_cells_per_block,
-                            hist_bins=hist_bins,
-                            hist_channels=hist_channels
-                        )
-                        st.success(f"Precomputed features: {result.get('message', 'Done')}")
-                        st.json(result.get('cache_stats', {}))
+                        result = clear_similarity_cache()
+                        st.success(result.get("message", "Cache cleared"))
                     except Exception as e:
-                        st.error(f"Failed to precompute features: {e}")
+                        st.error(f"Failed to clear cache: {e}")
             
-            if st.button("Clear Cache"):
-                try:
-                    result = clear_similarity_cache()
-                    st.success(result.get("message", "Cache cleared"))
-                except Exception as e:
-                    st.error(f"Failed to clear cache: {e}")
-            
-            if st.button("Show Cache Stats"):
-                try:
-                    stats = get_similarity_cache_stats()
-                    st.json(stats)
-                except Exception as e:
-                    st.error(f"Failed to get cache stats: {e}")
+            with col2:
+                if st.button("Show Cache Stats"):
+                    try:
+                        stats = get_similarity_cache_stats()
+                        st.json(stats)
+                    except Exception as e:
+                        st.error(f"Failed to get cache stats: {e}")
     
     # Main content area
     col1, col2 = st.columns([1, 1])
@@ -188,7 +214,7 @@ def render_similarity_search():
             if uploaded_query is not None:
                 # Display the uploaded image
                 query_image_display = Image.open(uploaded_query)
-        st.image(query_image_display, caption="Query Image", use_container_width=True)
+                st.image(query_image_display, caption="Query Image", width='stretch')
                 
                 # Convert to base64
                 buffer = io.BytesIO()
@@ -196,10 +222,109 @@ def render_similarity_search():
                 query_image_base64 = base64.b64encode(buffer.getvalue()).decode()
         
         # Search button
-        search_button = st.button("🔍 Search Similar Images", type="primary", use_container_width=True)
+        search_button = st.button("🔍 Search Similar Images", type="primary", width='stretch')
+        
+        # Precompute features section
+        st.markdown("---")
+        
+        col_btn, col_clear = st.columns([3, 1])
+        with col_btn:
+            precompute_button = st.button("⚡ Precompute Features", help="Compute and cache features for faster searches")
+        with col_clear:
+            if st.button("🗑️ Clear"):
+                if 'precompute_result' in st.session_state:
+                    del st.session_state.precompute_result
+                if 'show_precompute_details' in st.session_state:
+                    del st.session_state.show_precompute_details
+                st.rerun()
+        
+        # Show precomputed features in collapsible section if button is clicked
+        if precompute_button:
+            with st.spinner("Computing features for all images..."):
+                try:
+                    result = precompute_similarity_features(
+                        feature_method=feature_method,
+                        resize_dimensions=resize_dimensions,
+                        hog_orientations=hog_orientations,
+                        hog_pixels_per_cell=hog_pixels_per_cell,
+                        hog_cells_per_block=hog_cells_per_block,
+                        hist_bins=hist_bins,
+                        hist_channels=hist_channels
+                    )
+                    
+                    # Success message
+                    st.success(f"✅ {result.get('message', 'Features precomputed successfully')}")
+                    
+                    # Store result in session state to show in search results column
+                    st.session_state.precompute_result = result
+                    
+                    # Force a rerun to show the results
+                    st.rerun()
+                    
+                except Exception as e:
+                    st.error(f"❌ Failed to precompute features: {e}")
+                    st.session_state.precompute_result = None
     
     with col2:
         st.subheader("Search Results")
+        
+        # Show precompute results in the search results area
+        if 'precompute_result' in st.session_state and st.session_state.precompute_result:
+            result = st.session_state.precompute_result
+            
+            st.markdown("## 📊 Precomputed Feature Details")
+            
+            # Show basic statistics from the result
+            st.markdown("### 📈 Processing Summary")
+            col_a, col_b, col_c = st.columns(3)
+            
+            with col_a:
+                processed_count = result.get('processed_count', 0)
+                st.metric("Images Processed", processed_count)
+            
+            with col_b:
+                failed_count = result.get('failed_count', 0)
+                st.metric("Failed", failed_count, delta_color="inverse" if failed_count > 0 else "normal")
+            
+            with col_c:
+                method_used = result.get('feature_method', 'CNN')
+                st.metric("Method", method_used.upper())
+            
+            # Show cache statistics
+            cache_stats = result.get('cache_stats', {})
+            if cache_stats:
+                st.markdown("### 💾 Cache Information")
+                
+                # Create a simple table of cache data
+                cache_data = []
+                
+                # Try different field names that the backend might use
+                total_cached = (cache_stats.get('total_cached_features') or 
+                               cache_stats.get('total_images_cached') or
+                               cache_stats.get('cached_images') or
+                               len(cache_stats.get('cache_breakdown', {})))
+                
+                cache_size_mb = cache_stats.get('cache_size_mb', 0)
+                
+                if total_cached:
+                    cache_data.append({"Property": "Total Cached Features", "Value": str(total_cached)})
+                if cache_size_mb:
+                    cache_data.append({"Property": "Cache Size (MB)", "Value": f"{cache_size_mb:.2f}"})
+                
+                # Add any other cache properties
+                for key, value in cache_stats.items():
+                    if key not in ['cache_breakdown']:
+                        cache_data.append({"Property": key.replace('_', ' ').title(), "Value": str(value)})
+                
+                if cache_data:
+                    df = pd.DataFrame(cache_data)
+                    st.dataframe(df, use_container_width=True, hide_index=True)
+            
+            # Show raw response for debugging
+            with st.expander("🔧 Complete API Response", expanded=False):
+                st.json(result)
+            
+            st.markdown("---")
         
         if search_button:
             if query_type == "Use uploaded image by index":
@@ -293,7 +418,7 @@ def render_similarity_search():
                                 # Format similarity scores
                                 results_df['similarity_score'] = results_df['similarity_score'].round(4)
                                 results_df['distance'] = results_df['distance'].round(4)
-                                st.dataframe(results_df, use_container_width=True)
+                                st.dataframe(results_df, width='stretch')
                         
                         # Show search parameters used
                         with st.expander("Search Parameters Used"):
@@ -325,6 +450,7 @@ def render_similarity_search():
            - **HOG**: Histogram of Oriented Gradients (good for shapes and textures)
            - **SIFT**: Scale-Invariant Feature Transform (robust to scale/rotation)
            - **histogram**: Color distribution (good for color-based similarity)
+           - **manuscript**: Specialized features for handwritten documents and text analysis
         
         3. **Select a distance metric**:
            - **cosine**: Measures angle between feature vectors

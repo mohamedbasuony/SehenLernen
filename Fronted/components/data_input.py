@@ -7,7 +7,7 @@ from utils import api_client
 
 
 def render_data_input():
-    st.header("Data Input")
+    st.markdown("<h1 style='text-align: center; font-size: 2.2rem; margin-bottom: 1.5rem; color: #2c3e50;'>Data Input</h1>", unsafe_allow_html=True)
 
     # Ensure keys exist
     st.session_state.setdefault("images", [])                # PIL previews for UI + next screen

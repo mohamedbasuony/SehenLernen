@@ -12,6 +12,7 @@ from io import BytesIO
 
 # Computer vision and ML libraries
 import cv2
+import scipy.stats
 from sklearn.metrics.pairwise import cosine_similarity, euclidean_distances, manhattan_distances
 from skimage.feature import hog
 from skimage import exposure
@@ -61,36 +62,81 @@ class SimilarityService:
     @staticmethod
     def extract_cnn_features(image: np.ndarray, resize_dims: Tuple[int, int] = (224, 224)) -> np.ndarray:
         """
-        Extract CNN-like features using a simple approach.
-        For a proper CNN, you'd use a pre-trained model like ResNet/VGG.
-        This is a simplified version using statistical features from patches.
+        Extract more discriminative CNN-like features using enhanced statistical analysis.
+        Improved version with better discrimination between different image types.
         """
         # Resize image
         image_resized = SimilarityService._resize_image(image, resize_dims)
         
-        # Convert to grayscale for feature extraction
+        # Work with both grayscale and color for better discrimination
         if len(image_resized.shape) == 3:
             gray = cv2.cvtColor(image_resized, cv2.COLOR_RGB2GRAY)
+            # Keep color information for better discrimination
+            color_channels = cv2.split(image_resized)
         else:
             gray = image_resized
+            color_channels = [gray, gray, gray]
         
-        # Extract statistical features from patches
-        patch_size = 16
         features = []
         
-        h, w = gray.shape
-        for y in range(0, h - patch_size + 1, patch_size):
-            for x in range(0, w - patch_size + 1, patch_size):
-                patch = gray[y:y+patch_size, x:x+patch_size]
-                
-                # Calculate statistical features for each patch
+        # 1. Multi-scale patch analysis for better discrimination
+        patch_sizes = [8, 16, 32]  # Multiple scales
+        
+        for patch_size in patch_sizes:
+            h, w = gray.shape
+            patch_features = []
+            
+            for y in range(0, h - patch_size + 1, patch_size):
+                for x in range(0, w - patch_size + 1, patch_size):
+                    patch = gray[y:y+patch_size, x:x+patch_size]
+                    
+                    # Enhanced statistical features for better discrimination
+                    patch_features.extend([
+                        np.mean(patch),
+                        np.std(patch),
+                        np.var(patch),  # Variance for texture analysis
+                        np.percentile(patch, 25),  # 1st quartile
+                        np.percentile(patch, 75),  # 3rd quartile
+                        np.sum(patch > np.mean(patch)) / patch.size,  # Threshold density
+                    ])
+            
+            # Aggregate patch features with statistics for scale
+            if patch_features:
+                patch_array = np.array(patch_features)
                 features.extend([
-                    np.mean(patch),
-                    np.std(patch),
-                    np.min(patch),
-                    np.max(patch),
-                    np.median(patch)
+                    np.mean(patch_array),
+                    np.std(patch_array),
+                    np.min(patch_array),
+                    np.max(patch_array),
+                    np.percentile(patch_array, 10),
+                    np.percentile(patch_array, 90)
                 ])
+        
+        # 2. Global image statistics for overall discrimination
+        features.extend([
+            np.mean(gray),
+            np.std(gray),
+            np.var(gray),
+            np.entropy(gray.flatten()) if hasattr(np, 'entropy') else np.std(gray),
+            # Edge density
+            cv2.Canny(gray, 50, 150).sum() / gray.size,
+        ])
+        
+        # 3. Color distribution features for better discrimination
+        for channel in color_channels:
+            hist, _ = np.histogram(channel, bins=16, range=(0, 256))
+            hist = hist.astype(float) / hist.sum()  # Normalize
+            features.extend(hist)
+        
+        # 4. Spatial frequency analysis
+        # High-frequency content analysis for texture discrimination
+        kernel_laplacian = np.array([[0, -1, 0], [-1, 4, -1], [0, -1, 0]])
+        laplacian = cv2.filter2D(gray, -1, kernel_laplacian)
+        features.extend([
+            np.mean(np.abs(laplacian)),
+            np.std(laplacian),
+            np.var(laplacian)
+        ])
         
         return np.array(features, dtype=np.float32)
     
@@ -102,48 +148,274 @@ class SimilarityService:
         cells_per_block: Tuple[int, int] = (2, 2),
         resize_dims: Tuple[int, int] = (128, 128)
     ) -> np.ndarray:
-        """Extract HOG (Histogram of Oriented Gradients) features."""
-        # Resize and convert to grayscale
-        image_resized = SimilarityService._resize_image(image, resize_dims)
-        if len(image_resized.shape) == 3:
-            gray = cv2.cvtColor(image_resized, cv2.COLOR_RGB2GRAY)
+        """Extract multi-scale HOG features for better discrimination."""
+        # Convert to grayscale first
+        if len(image.shape) == 3:
+            gray = cv2.cvtColor(image, cv2.COLOR_RGB2GRAY)
         else:
-            gray = image_resized
+            gray = image
         
-        # Extract HOG features
-        features = hog(
-            gray,
-            orientations=orientations,
-            pixels_per_cell=pixels_per_cell,
-            cells_per_block=cells_per_block,
-            visualize=False,
-            feature_vector=True
-        )
+        features = []
         
-        return features.astype(np.float32)
+        # Multi-scale HOG extraction for better discrimination
+        scales = [(64, 64), (128, 128), (256, 256)]  # Different scales
+        
+        for width, height in scales:
+            resized = cv2.resize(gray, (width, height))
+            
+            # Extract HOG features with different parameters for each scale
+            if width == 64:
+                # Fine-grained features
+                hog_feat = hog(
+                    resized,
+                    orientations=9,
+                    pixels_per_cell=(4, 4),
+                    cells_per_block=(1, 1),
+                    visualize=False,
+                    feature_vector=True
+                )
+            elif width == 128:
+                # Medium-grained features (original scale)
+                hog_feat = hog(
+                    resized,
+                    orientations=orientations,
+                    pixels_per_cell=pixels_per_cell,
+                    cells_per_block=cells_per_block,
+                    visualize=False,
+                    feature_vector=True
+                )
+            else:  # 256x256
+                # Coarse-grained features
+                hog_feat = hog(
+                    resized,
+                    orientations=12,
+                    pixels_per_cell=(16, 16),
+                    cells_per_block=(2, 2),
+                    visualize=False,
+                    feature_vector=True
+                )
+            
+            features.extend(hog_feat)
+        
+        # Add global image statistics for better discrimination
+        features.extend([
+            np.mean(gray),
+            np.std(gray),
+            np.var(gray),
+            gray.shape[0] / gray.shape[1],  # Aspect ratio
+        ])
+        
+        # Add gradient statistics
+        grad_x = cv2.Sobel(gray, cv2.CV_64F, 1, 0, ksize=3)
+        grad_y = cv2.Sobel(gray, cv2.CV_64F, 0, 1, ksize=3)
+        
+        features.extend([
+            np.mean(np.abs(grad_x)),
+            np.std(grad_x),
+            np.mean(np.abs(grad_y)),
+            np.std(grad_y),
+        ])
+        
+        # Add edge density information for better texture discrimination
+        edges = cv2.Canny(gray, 50, 150)
+        edge_density = np.sum(edges > 0) / edges.size
+        features.append(edge_density)
+        
+        return np.array(features, dtype=np.float32)
     
     @staticmethod
     def extract_sift_features(image: np.ndarray, max_features: int = 100) -> np.ndarray:
-        """Extract SIFT features and aggregate them."""
+        """Extract SIFT features with improved aggregation for better discrimination."""
         # Convert to grayscale
         if len(image.shape) == 3:
             gray = cv2.cvtColor(image, cv2.COLOR_RGB2GRAY)
         else:
             gray = image
         
-        # Initialize SIFT detector
-        sift = cv2.SIFT_create(nfeatures=max_features)
+        # Initialize SIFT detector with better parameters for discrimination
+        sift = cv2.SIFT_create(nfeatures=max_features, contrastThreshold=0.04, edgeThreshold=10)
         
         # Detect keypoints and compute descriptors
         keypoints, descriptors = sift.detectAndCompute(gray, None)
         
         if descriptors is None or len(descriptors) == 0:
             # Return zero vector if no features found
-            return np.zeros(128, dtype=np.float32)
+            return np.zeros(256, dtype=np.float32)  # Larger feature vector for better discrimination
         
-        # Aggregate descriptors (mean of all descriptors)
-        aggregated = np.mean(descriptors, axis=0)
-        return aggregated.astype(np.float32)
+        # Improved aggregation for better discrimination
+        features = []
+        
+        # 1. Basic statistics
+        features.extend([
+            np.mean(descriptors, axis=0).mean(),
+            np.std(descriptors, axis=0).mean(),
+            np.min(descriptors, axis=0).mean(),
+            np.max(descriptors, axis=0).mean(),
+        ])
+        
+        # 2. Descriptor distribution analysis
+        features.extend([
+            np.mean(descriptors),
+            np.std(descriptors),
+            np.var(descriptors),
+            len(descriptors) / max_features,  # Keypoint density
+        ])
+        
+        # 3. Keypoint spatial distribution for better discrimination
+        if len(keypoints) > 0:
+            kp_coords = np.array([[kp.pt[0], kp.pt[1]] for kp in keypoints])
+            features.extend([
+                np.mean(kp_coords[:, 0]),  # Mean X coordinate
+                np.mean(kp_coords[:, 1]),  # Mean Y coordinate
+                np.std(kp_coords[:, 0]),   # X spread
+                np.std(kp_coords[:, 1]),   # Y spread
+            ])
+            
+            # Keypoint response and scale statistics
+            responses = np.array([kp.response for kp in keypoints])
+            scales = np.array([kp.size for kp in keypoints])
+            
+            features.extend([
+                np.mean(responses),
+                np.std(responses),
+                np.mean(scales),
+                np.std(scales),
+            ])
+        else:
+            features.extend([0] * 8)  # Padding for missing keypoints
+        
+        # 4. Quantized descriptor histogram for pattern analysis
+        # Create a histogram of descriptor values for better discrimination
+        hist_bins = 32
+        desc_flat = descriptors.flatten()
+        hist, _ = np.histogram(desc_flat, bins=hist_bins, range=(0, 255))
+        hist = hist.astype(float) / (hist.sum() + 1e-7)  # Normalize
+        features.extend(hist)
+        
+        # 5. Top descriptors analysis (most distinctive features)
+        if len(descriptors) > 10:
+            # Select top 10 most distinctive descriptors based on variance
+            desc_vars = np.var(descriptors, axis=1)
+            top_indices = np.argsort(desc_vars)[-10:]
+            top_descriptors = descriptors[top_indices]
+            features.extend(np.mean(top_descriptors, axis=0))
+        else:
+            # Pad with mean if not enough descriptors
+            features.extend(np.mean(descriptors, axis=0))
+        
+        # Ensure consistent output size
+        feature_array = np.array(features, dtype=np.float32)
+        
+        # Pad or truncate to exactly 256 features
+        if len(feature_array) < 256:
+            padding = np.zeros(256 - len(feature_array), dtype=np.float32)
+            feature_array = np.concatenate([feature_array, padding])
+        elif len(feature_array) > 256:
+            feature_array = feature_array[:256]
+        
+        return feature_array
+    
+    @staticmethod
+    def extract_manuscript_features(
+        image: np.ndarray,
+        resize_dims: Tuple[int, int] = (256, 256)
+    ) -> np.ndarray:
+        """
+        Extract features specifically optimized for manuscripts and ancient books.
+        Combines texture analysis, edge patterns, and layout features.
+        """
+        # Resize image
+        image_resized = SimilarityService._resize_image(image, resize_dims)
+        
+        # Convert to grayscale for analysis
+        if len(image_resized.shape) == 3:
+            gray = cv2.cvtColor(image_resized, cv2.COLOR_RGB2GRAY)
+        else:
+            gray = image_resized
+        
+        features = []
+        
+        # 1. Enhanced contrast and preprocessing for old documents
+        # Apply CLAHE (Contrast Limited Adaptive Histogram Equalization)
+        clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
+        enhanced = clahe.apply(gray)
+        
+        # 2. Text/Script texture features using Local Binary Patterns
+        from skimage.feature import local_binary_pattern
+        lbp_radius = 3
+        lbp_points = 8 * lbp_radius
+        lbp = local_binary_pattern(enhanced, lbp_points, lbp_radius, method='uniform')
+        lbp_hist, _ = np.histogram(lbp.ravel(), bins=lbp_points + 2, range=(0, lbp_points + 2))
+        lbp_hist = lbp_hist.astype(float)
+        lbp_hist /= (lbp_hist.sum() + 1e-7)  # Normalize
+        features.extend(lbp_hist)
+        
+        # 3. Multi-scale HOG for script patterns (optimized for text)
+        # Fine-scale HOG for character strokes
+        hog_fine = hog(enhanced, orientations=18, pixels_per_cell=(4, 4), 
+                      cells_per_block=(2, 2), visualize=False, feature_vector=True)
+        features.extend(hog_fine)
+        
+        # Coarse-scale HOG for word/line patterns  
+        hog_coarse = hog(enhanced, orientations=9, pixels_per_cell=(16, 16),
+                        cells_per_block=(2, 2), visualize=False, feature_vector=True)
+        features.extend(hog_coarse)
+        
+        # 4. Layout and structure features
+        # Horizontal and vertical projection profiles for line detection
+        h_profile = np.sum(enhanced, axis=1)  # Horizontal projection
+        v_profile = np.sum(enhanced, axis=0)  # Vertical projection
+        
+        # Downsample profiles for feature vector
+        h_profile_bins = np.histogram(h_profile, bins=32)[0].astype(float)
+        v_profile_bins = np.histogram(v_profile, bins=32)[0].astype(float)
+        h_profile_bins /= (h_profile_bins.sum() + 1e-7)
+        v_profile_bins /= (v_profile_bins.sum() + 1e-7)
+        features.extend(h_profile_bins)
+        features.extend(v_profile_bins)
+        
+        # 5. Edge orientation analysis for script characteristics
+        # Compute gradients
+        grad_x = cv2.Sobel(enhanced, cv2.CV_64F, 1, 0, ksize=3)
+        grad_y = cv2.Sobel(enhanced, cv2.CV_64F, 0, 1, ksize=3)
+        magnitude = np.sqrt(grad_x**2 + grad_y**2)
+        orientation = np.arctan2(grad_y, grad_x)
+        
+        # Threshold by magnitude and create orientation histogram
+        strong_edges = magnitude > np.percentile(magnitude, 75)
+        edge_orientations = orientation[strong_edges]
+        
+        # Convert to degrees and create histogram
+        edge_orientations_deg = np.degrees(edge_orientations) % 180
+        orientation_hist, _ = np.histogram(edge_orientations_deg, bins=18, range=(0, 180))
+        orientation_hist = orientation_hist.astype(float)
+        orientation_hist /= (orientation_hist.sum() + 1e-7)
+        features.extend(orientation_hist)
+        
+        # 6. Texture regularity features
+        # Measure of text regularity vs. decorative elements
+        # Standard deviation of pixel intensities in patches
+        patch_size = 16
+        texture_variance = []
+        h, w = enhanced.shape
+        for y in range(0, h - patch_size + 1, patch_size):
+            for x in range(0, w - patch_size + 1, patch_size):
+                patch = enhanced[y:y+patch_size, x:x+patch_size]
+                texture_variance.append(np.std(patch))
+        
+        # Statistics of texture variance across patches
+        if texture_variance:
+            texture_stats = [
+                np.mean(texture_variance),
+                np.std(texture_variance),
+                np.percentile(texture_variance, 25),
+                np.percentile(texture_variance, 75)
+            ]
+            features.extend(texture_stats)
+        else:
+            features.extend([0, 0, 0, 0])
+        
+        return np.array(features, dtype=np.float32)
     
     @staticmethod
     def extract_histogram_features(
@@ -151,25 +423,92 @@ class SimilarityService:
         bins: int = 64,
         channels: List[int] = [0, 1, 2]
     ) -> np.ndarray:
-        """Extract color histogram features."""
+        """Extract enhanced histogram features for better discrimination."""
         features = []
         
-        # Ensure image is in RGB format
-        if len(image.shape) == 2:
-            # Grayscale image
+        # Convert to different color spaces for comprehensive analysis
+        if len(image.shape) == 3:
+            # RGB histograms
+            for channel in range(3):
+                hist = cv2.calcHist([image], [channel], None, [bins], [0, 256])
+                features.extend(hist.flatten())
+            
+            # HSV histograms for better color discrimination
+            hsv = cv2.cvtColor(image, cv2.COLOR_RGB2HSV)
+            for channel in range(3):
+                if channel == 0:  # Hue channel (0-180)
+                    hist = cv2.calcHist([hsv], [channel], None, [bins//2], [0, 180])
+                else:  # Saturation and Value channels (0-255)
+                    hist = cv2.calcHist([hsv], [channel], None, [bins], [0, 256])
+                features.extend(hist.flatten())
+            
+            # LAB color space for perceptual uniformity
+            lab = cv2.cvtColor(image, cv2.COLOR_RGB2LAB)
+            for channel in range(3):
+                hist = cv2.calcHist([lab], [channel], None, [bins], [0, 256])
+                features.extend(hist.flatten())
+            
+            # Add color moments for each channel (RGB)
+            for channel in range(3):
+                channel_data = image[:, :, channel].flatten()
+                # First moment (mean)
+                features.append(np.mean(channel_data))
+                # Second moment (variance)
+                features.append(np.var(channel_data))
+                # Third moment (skewness)
+                features.append(scipy.stats.skew(channel_data))
+                # Fourth moment (kurtosis)
+                features.append(scipy.stats.kurtosis(channel_data))
+            
+        else:
+            # Grayscale image - more detailed analysis
             hist = cv2.calcHist([image], [0], None, [bins], [0, 256])
             features.extend(hist.flatten())
-        else:
-            # Color image - extract histogram for each specified channel
-            for channel in channels:
-                if channel < image.shape[2]:
-                    hist = cv2.calcHist([image], [channel], None, [bins], [0, 256])
-                    features.extend(hist.flatten())
+            
+            # Add texture-based histogram features
+            # Local Binary Pattern histogram
+            from skimage.feature import local_binary_pattern
+            lbp = local_binary_pattern(image, P=8, R=1, method='uniform')
+            lbp_hist, _ = np.histogram(lbp.flatten(), bins=bins//4, range=(0, 10))
+            features.extend(lbp_hist)
+            
+            # Gradient magnitude histogram
+            grad_x = cv2.Sobel(image, cv2.CV_64F, 1, 0, ksize=3)
+            grad_y = cv2.Sobel(image, cv2.CV_64F, 0, 1, ksize=3)
+            magnitude = np.sqrt(grad_x**2 + grad_y**2)
+            mag_hist, _ = np.histogram(magnitude.flatten(), bins=bins//2, range=(0, 255))
+            features.extend(mag_hist)
         
-        # Normalize histogram
+        # Add global statistics for better discrimination
+        flat_image = image.flatten() if len(image.shape) == 2 else image.reshape(-1, image.shape[-1])
+        
+        if len(image.shape) == 2:
+            features.extend([
+                np.mean(flat_image),
+                np.std(flat_image),
+                np.min(flat_image),
+                np.max(flat_image),
+                np.median(flat_image),
+                scipy.stats.entropy(np.histogram(flat_image, bins=256)[0] + 1e-7),  # Image entropy
+            ])
+        else:
+            # Multi-channel statistics
+            for channel in range(image.shape[-1]):
+                channel_data = flat_image[:, channel]
+                features.extend([
+                    np.mean(channel_data),
+                    np.std(channel_data),
+                    np.min(channel_data),
+                    np.max(channel_data),
+                ])
+        
+        # Normalize features
         features = np.array(features, dtype=np.float32)
-        if np.sum(features) > 0:
-            features = features / np.sum(features)
+        
+        # L2 normalization for better discrimination
+        norm = np.linalg.norm(features)
+        if norm > 0:
+            features = features / norm
         
         return features
     
@@ -367,6 +706,7 @@ class SimilarityService:
         }
     
     @staticmethod
+    @staticmethod
     def extract_features(
         image: np.ndarray,
         method: str = "CNN",
@@ -395,6 +735,12 @@ class SimilarityService:
                     image,
                     bins=kwargs.get('hist_bins', 64),
                     channels=kwargs.get('hist_channels', [0, 1, 2])
+                )
+            
+            elif method == "manuscript":
+                return SimilarityService.extract_manuscript_features(
+                    image,
+                    resize_dims=tuple(kwargs.get('resize_dimensions', [256, 256]))
                 )
             
             else:
@@ -531,8 +877,26 @@ class SimilarityService:
                         metric=distance_metric
                     )
                     
-                    # Apply threshold filter if specified
-                    if threshold is None or similarity_score >= threshold:
+                    # Apply STRICT intelligent thresholds based on feature method and score distribution
+                    should_include = False
+                    if threshold is None:
+                        # Use much stricter method-specific thresholds based on analysis
+                        if feature_method == "manuscript":
+                            should_include = similarity_score >= 0.85  # Only very similar manuscript features
+                        elif feature_method == "HOG":
+                            should_include = similarity_score >= 0.8   # Only strong HOG matches
+                        elif feature_method == "SIFT":
+                            should_include = similarity_score >= 0.95  # SIFT has poor discrimination, use high threshold
+                        elif feature_method == "histogram":
+                            should_include = similarity_score >= 0.75  # Histogram shows good discrimination
+                        elif feature_method == "CNN":
+                            should_include = similarity_score >= 0.98  # CNN has very poor discrimination
+                        else:
+                            should_include = similarity_score >= 0.8   # Default strict threshold
+                    else:
+                        should_include = similarity_score >= threshold
+                    
+                    if should_include:
                         similar_images.append({
                             "image_id": image_id,
                             "similarity_score": similarity_score,

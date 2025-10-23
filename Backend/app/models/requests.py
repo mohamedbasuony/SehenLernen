@@ -179,7 +179,7 @@ class SimilaritySearchRequest(BaseModel):
     """Request model for similarity search."""
     query_image_index: Optional[int] = Field(default=None, description="Index of uploaded image to use as query")
     query_image_base64: Optional[str] = Field(default=None, description="Base64 encoded query image (alternative to index)")
-    feature_method: Literal["CNN", "HOG", "SIFT", "histogram"] = Field(default="CNN", description="Feature extraction method")
+    feature_method: Literal["CNN", "HOG", "SIFT", "histogram", "manuscript"] = Field(default="CNN", description="Feature extraction method")
     distance_metric: Literal["cosine", "euclidean", "manhattan"] = Field(default="cosine", description="Distance metric for similarity")
     max_results: int = Field(default=10, ge=1, le=100, description="Maximum number of similar images to return")
     threshold: Optional[float] = Field(default=None, ge=0.0, le=1.0, description="Similarity threshold (0-1, higher = more similar)")
@@ -300,8 +300,4 @@ class ClassifierPredictionRequest(BaseModel):
     return_probabilities: bool = True
 
 
-class CooccurrenceRequest(BaseModel):
-    """
-    Simple request for co-occurrence texture feature extraction.
-    """
-    image_index: int = Field(..., description="Zero-based index of the image to analyze")
+

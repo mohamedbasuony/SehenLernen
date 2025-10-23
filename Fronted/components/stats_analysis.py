@@ -2,7 +2,7 @@ import streamlit as st
 
 # Statistics Analysis page component
 def render_stats_analysis():
-    st.header("Statistics Analysis")
+    st.markdown("<h1 style='text-align: center; font-size: 2.2rem; margin-bottom: 1.5rem; color: #2c3e50;'>Statistics Analysis</h1>", unsafe_allow_html=True)
     
     # Ensure feature embeddings or metrics available
     if not st.session_state.get("feature_results"):

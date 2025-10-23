@@ -16,9 +16,9 @@ from typing import Optional
 from utils.api_client import (
     generate_histogram,
     perform_kmeans,
+    perform_single_image_kmeans,
     extract_shape_features,
     extract_haralick_texture,      # train/predict workflow (kept, just renamed in UI)
-    extract_cooccurrence_texture,
     replace_image,                 # persist cropped image to backend
     extract_haralick_features,     # table-style GLCM Haralick
     extract_lbp_features,          # NEW: LBP feature extraction
@@ -33,6 +33,9 @@ from utils.api_client import (
     train_classifier,
     predict_classifier,
 )
+
+# Import Seher AI Chat Island (floating bubble only)
+from .seher_smart_chat import update_chat_context
 
 # ---------- Helpers ----------
 def _get_image_id_for_index(idx: int) -> str | None:
@@ -136,6 +139,8 @@ def _init_state():
     st.session_state.setdefault("crop_index", None)
     st.session_state.setdefault("crop_aspect_label", "Free")
     st.session_state.setdefault("crop_realtime", True)
+    st.session_state.setdefault("fullscreen_image", None)
+    st.session_state.setdefault("fullscreen_section", None)
 
 
 def _aspect_ratio_value(label: str):
@@ -232,17 +237,17 @@ def _render_metrics_section(metrics: dict | None, heading: str) -> None:
     if metrics.get("confusion_matrix"):
         st.caption("Confusion Matrix")
         matrix_df = pd.DataFrame(metrics["confusion_matrix"])
-        st.dataframe(matrix_df, use_container_width=True)
+        st.dataframe(matrix_df, width='stretch')
 
     if metrics.get("classification_report"):
         report_df = pd.DataFrame(metrics["classification_report"]).T
         st.caption("Classification Report")
-        st.dataframe(report_df, use_container_width=True)
+        st.dataframe(report_df, width='stretch')
 
 # ---------- Main Entry ----------
 def render_feature_selection():
     import pandas as pd  # Ensure pandas is available in function scope
-    st.header("Feature Selection")
+    st.markdown("<h1 style='text-align: center; font-size: 2.2rem; margin-bottom: 1.5rem; color: #2c3e50;'>Feature Selection</h1>", unsafe_allow_html=True)
     _init_state()
 
     if "images" not in st.session_state or not st.session_state["images"]:
@@ -250,6 +255,40 @@ def render_feature_selection():
         return
 
     images = st.session_state["images"]
+
+    # =========================
+    # Fullscreen Image View
+    # =========================
+    if st.session_state.get("fullscreen_image"):
+        st.markdown("<h2 style='text-align: center; margin-bottom: 1rem;'>Fullscreen View</h2>", unsafe_allow_html=True)
+        
+        # Exit button at the top
+        col1, col2, col3 = st.columns([1, 2, 1])
+        with col2:
+            if st.button("🔙 Back to Feature Selection", key="exit_fullscreen", type="primary", width='stretch'):
+                st.session_state["fullscreen_image"] = None
+                st.session_state["fullscreen_section"] = None
+                st.rerun()
+        
+        st.markdown("---")
+        
+        # Display the fullscreen image
+        st.image(
+            st.session_state["fullscreen_image"], 
+            caption=f"Enlarged view - {st.session_state.get('fullscreen_section', 'Image')}", 
+            use_column_width=True
+        )
+        
+        # Another exit button at the bottom for convenience
+        st.markdown("---")
+        col1, col2, col3 = st.columns([1, 2, 1])
+        with col2:
+            if st.button("🔙 Back to Feature Selection", key="exit_fullscreen_bottom", type="primary", width='stretch'):
+                st.session_state["fullscreen_image"] = None
+                st.session_state["fullscreen_section"] = None
+                st.rerun()
+        
+        return  # Exit early to show only fullscreen view
 
     # =========================
     # Dedicated Crop Screen (centered)
@@ -344,14 +383,13 @@ def render_feature_selection():
     # Normal Tabs (when not cropping)
     # =========================
     # ADD: New tabs including Similarity Search
-    tab1, tab2, tab3, tab4, tab5, tab6, tab7, tab8, tab9, tab10 = st.tabs(
+    tab1, tab2, tab3, tab4, tab5, tab6, tab7, tab8, tab9 = st.tabs(
         [
             "Histogram Analysis",
             "k-means Clustering", 
             "Shape Features",
             "Similarity Search",             # NEW - Added here
             "Haralick Texture",
-            "Co-Occurrence Texture",
             "Local Binary Patterns (LBP)",
             "Contour Extraction",
             "SIFT & Edge Detection",
@@ -361,7 +399,10 @@ def render_feature_selection():
 
     # --- Histogram Analysis ---
     with tab1:
-        st.subheader("Histogram Analysis")
+        # Update context for Seher AI as soon as this tab is shown
+        update_chat_context("histogram", ["hist_type", "all_images", "selected_image"])
+        st.subheader("📊 Histogram Analysis")
+        
         hist_type = st.radio("Histogram Type", options=["Black and White", "Colored"], key="hist_type")
         all_images = st.checkbox("Generate histogram for all images", key="hist_all")
         selected_index = st.selectbox(
@@ -404,6 +445,7 @@ def render_feature_selection():
                     if st.button(f"Enlarge {i+1}", key=f"enlarge_hist_{i}"):
                         st.session_state["fullscreen_image"] = img_bytes
                         st.session_state["fullscreen_section"] = "histogram"
+                        st.rerun()
                     # NEW: Contours button next to Enlarge
                     if st.button(f"Contours {i+1}", key=f"contours_hist_{i}"):
                         with st.spinner("Extracting contours..."):
@@ -491,6 +533,10 @@ def render_feature_selection():
                     st.success(f"HOG feature vector length: {len(feats)}")
                     if result.get("visualization") is not None:
                         st.image(result["visualization"], caption="HOG Visualization", width=400)
+                        if st.button("Enlarge HOG Visualization", key="enlarge_hog_viz"):
+                            st.session_state["fullscreen_image"] = result["visualization"]
+                            st.session_state["fullscreen_section"] = "HOG Visualization"
+                            st.rerun()
 
                     # Download CSV for the single vector
                     cols = [f"f{i}" for i in range(len(feats))]
@@ -507,57 +553,134 @@ def render_feature_selection():
 
     # --- k-means Clustering ---
     with tab2:
-        st.subheader("k-means Clustering")
+        # Update context for Seher AI
+        update_chat_context("kmeans", ["n_clusters", "random_state", "image_selection", "clustering_mode"])
+        st.subheader("🎨 K-means Clustering")
+        
+        # Clustering mode selection
+        clustering_mode = st.radio(
+            "Clustering Mode",
+            options=["Multi-Image Clustering", "Single Image Segmentation"],
+            help="Multi-Image: Cluster multiple images based on their features. Single Image: Segment one image by color regions.",
+            key="kmeans_mode"
+        )
+        
         cluster_count = st.number_input("Number of Clusters", min_value=2, max_value=10, value=2, key="kmeans_k")
         random_state = st.number_input("Random Seed", min_value=0, max_value=100, value=42, key="kmeans_rs")
 
-        st.markdown("### Image Selection")
-        all_images_checkbox = st.checkbox("Select all images", key="kmeans_all_images")
+        if clustering_mode == "Multi-Image Clustering":
+            st.markdown("### Image Selection")
+            all_images_checkbox = st.checkbox("Select all images", key="kmeans_all_images")
 
-        if all_images_checkbox:
-            selected_indices = list(range(len(images)))
-            st.info(f"All {len(images)} images selected")
-        else:
-            selected_indices = st.multiselect(
-                "Select images for clustering",
+            if all_images_checkbox:
+                selected_indices = list(range(len(images)))
+                st.info(f"All {len(images)} images selected")
+            else:
+                selected_indices = st.multiselect(
+                    "Select images for clustering",
+                    options=list(range(len(images))),
+                    format_func=lambda x: f"Image {x+1}",
+                    key="kmeans_image_indices",
+                )
+
+            if st.button("Perform Multi-Image K-means", key="btn_kmeans"):
+                if not images:
+                    st.error("No images have been uploaded. Please upload images first.")
+                elif not selected_indices and not all_images_checkbox:
+                    st.error("Select at least one image or check 'Select all images'.")
+                elif len(selected_indices) < 2 and not all_images_checkbox:
+                    st.error("Multi-image clustering requires at least 2 images. Select more images or use Single Image Segmentation mode.")
+                elif all_images_checkbox and len(images) < 2:
+                    st.error("Multi-image clustering requires at least 2 images. Upload more images or use Single Image Segmentation mode.")
+                else:
+                    try:
+                        params = {
+                            "n_clusters": cluster_count,
+                            "random_state": random_state,
+                            "selected_images": selected_indices if not all_images_checkbox else [],
+                            "use_all_images": all_images_checkbox,
+                        }
+                        plot_bytes, assignments = perform_kmeans(params)
+                        st.image(plot_bytes, caption="Multi-Image K-means Clustering", width=400)
+                        if st.button("Enlarge K-means Plot", key="enlarge_kmeans_plot"):
+                            st.session_state["fullscreen_image"] = plot_bytes
+                            st.session_state["fullscreen_section"] = "K-means Clustering"
+                            st.rerun()
+                        st.write("Cluster Assignments:")
+
+                        if "metadata_df" in st.session_state and "image_id_col" in st.session_state:
+                            metadata = st.session_state["metadata_df"]
+                            id_col = st.session_state["image_id_col"]
+                            image_ids = metadata[id_col].tolist()
+                            for idx, label in enumerate(assignments):
+                                image_name = image_ids[idx] if idx < len(image_ids) else f"Image {idx+1}"
+                                st.write(f"{image_name} → Cluster {label}")
+                        else:
+                            for idx, label in enumerate(assignments):
+                                st.write(f"Image {idx+1} → Cluster {label}")
+                    except Exception as e:
+                        st.error(f"Error performing multi-image K-means clustering: {str(e)}")
+        
+        else:  # Single Image Segmentation
+            st.markdown("### Image Selection")
+            selected_idx = st.selectbox(
+                "Select image for segmentation",
                 options=list(range(len(images))),
                 format_func=lambda x: f"Image {x+1}",
-                key="kmeans_image_indices",
+                key="kmeans_single_image_idx"
             )
-
-        if st.button("Perform K-means", key="btn_kmeans"):
-            if not images:
-                st.error("No images have been uploaded. Please upload images first.")
-            elif not selected_indices and not all_images_checkbox:
-                st.error("Select at least one image or check 'Select all images'.")
-            else:
-                try:
-                    params = {
-                        "n_clusters": cluster_count,
-                        "random_state": random_state,
-                        "selected_images": selected_indices if not all_images_checkbox else [],
-                        "use_all_images": all_images_checkbox,
-                    }
-                    plot_bytes, assignments = perform_kmeans(params)
-                    st.image(plot_bytes, caption="K-means Clustering", width=400)
-                    st.write("Cluster Assignments:")
-
-                    if "metadata_df" in st.session_state and "image_id_col" in st.session_state:
-                        metadata = st.session_state["metadata_df"]
-                        id_col = st.session_state["image_id_col"]
-                        image_ids = metadata[id_col].tolist()
-                        for idx, label in enumerate(assignments):
-                            image_name = image_ids[idx] if idx < len(image_ids) else f"Image {idx+1}"
-                            st.write(f"{image_name} → Cluster {label}")
-                    else:
-                        for idx, label in enumerate(assignments):
-                            st.write(f"Image {idx+1} → Cluster {label}")
-                except Exception as e:
-                    st.error(f"Error performing K-means clustering: {str(e)}")
+            
+            max_pixels = st.number_input(
+                "Max Pixels to Process", 
+                min_value=1000, 
+                max_value=50000, 
+                value=10000, 
+                step=1000,
+                help="Larger values give better quality but slower processing",
+                key="kmeans_max_pixels"
+            )
+            
+            if st.button("Perform Single Image Segmentation", key="btn_single_kmeans"):
+                if not images:
+                    st.error("No images have been uploaded. Please upload images first.")
+                else:
+                    try:
+                        params = {
+                            "image_index": selected_idx,
+                            "n_clusters": cluster_count,
+                            "random_state": random_state,
+                            "max_pixels": max_pixels,
+                        }
+                        segmented_bytes, plot_bytes = perform_single_image_kmeans(params)
+                        
+                        # Display comparison plot
+                        st.image(plot_bytes, caption="Original vs Segmented Image", width=600)
+                        
+                        if st.button("Enlarge Segmentation Plot", key="enlarge_segmentation_plot"):
+                            st.session_state["fullscreen_image"] = plot_bytes
+                            st.session_state["fullscreen_section"] = "K-means Segmentation"
+                            st.rerun()
+                        
+                        # Display segmented image separately
+                        st.subheader("Segmented Image")
+                        st.image(segmented_bytes, caption=f"Color Segmentation (k={cluster_count})", width=400)
+                        
+                        # Download option
+                        st.download_button(
+                            label="Download Segmented Image",
+                            data=segmented_bytes,
+                            file_name=f"segmented_image_k{cluster_count}.png",
+                            mime="image/png"
+                        )
+                        
+                    except Exception as e:
+                        st.error(f"Error performing single image segmentation: {str(e)}")
 
     # --- Shape Features ---
     with tab3:
-        st.subheader("Shape Feature Extraction")
+        # Update context for Seher AI
+        update_chat_context("shape", ["method", "selected_image"])
+        st.subheader("🔷 Shape Feature Extraction")
         
         # Create sub-tabs for different feature types
         shape_subtab1, shape_subtab2 = st.tabs(["Traditional Features", "Deep Learning Embeddings"])
@@ -577,6 +700,10 @@ def render_feature_selection():
                 viz = result.get("visualization")
                 if viz:
                     st.image(viz, caption=f"{shape_method} Visualization", width=400)
+                    if st.button(f"Enlarge {shape_method} Visualization", key=f"enlarge_shape_{shape_method.lower()}"):
+                        st.session_state["fullscreen_image"] = viz
+                        st.session_state["fullscreen_section"] = f"{shape_method} Visualization"
+                        st.rerun()
         
         # Deep learning embeddings
         with shape_subtab2:
@@ -870,7 +997,7 @@ def render_feature_selection():
                             st.error(f"❌ Precompute failed: {e}")
                 
                 # Main search button
-                if st.button("🔍 Find Similar Images", type="primary", key="sim_search_btn", use_container_width=True):
+                if st.button("🔍 Find Similar Images", type="primary", key="sim_search_btn", width='stretch'):
                     with st.spinner(f"Searching for images similar to Image {query_idx+1}..."):
                         try:
                             # Build search parameters
@@ -925,7 +1052,7 @@ def render_feature_selection():
                                     df = pd.DataFrame(similar_images)
                                     df['similarity_score'] = df['similarity_score'].round(4)
                                     df['distance'] = df['distance'].round(4)
-                                    st.dataframe(df, use_container_width=True)
+                                    st.dataframe(df, width='stretch')
                         
                         except Exception as e:
                             error_msg = str(e)
@@ -1090,7 +1217,8 @@ def render_feature_selection():
 
     # --- Haralick Texture ---
     with tab5:
-        st.subheader("Haralick Texture Tools")
+        st.subheader("🧵 Haralick Texture Tools")
+        
         st.caption(
             "Compute Haralick texture features directly from the images you uploaded above. "
             "Choose distances, angles, quantization levels, and (optionally) resize for faster or consistent results."
@@ -1163,7 +1291,7 @@ def render_feature_selection():
                             st.success(f"Computed features for {len(rows)} image(s).")
                             st.dataframe(
                                 {cols[i]: [row[i] for row in rows] for i in range(len(cols))},
-                                use_container_width=True,
+                                width='stretch',
                             )
                             csv_bytes = _to_csv_bytes(cols, rows)
                             st.download_button(
@@ -1201,144 +1329,28 @@ def render_feature_selection():
 
         # Keep key the same; only label changes
         if st.button("Train & Predict", key="btn_haralick"):
-            labels, preds = extract_haralick_texture(
-                {"train_images": train_imgs, "train_labels": train_csv, "test_images": test_imgs}
-            )
-            st.write("Predicted Labels:")
-            for i, p in enumerate(preds):
-                st.write(f"Test Image {i+1}: {p}")
-
-    # --- Haralick Texture ---
-    with tab5:
-        st.subheader("Haralick Texture Tools")
-
-        # --- GLCM Haralick for current uploaded images (table output) ---
-        st.markdown("##### Analyze Texture Features (GLCM Haralick)")
-        st.caption(
-            "Compute Haralick texture features directly from the images you uploaded above. "
-            "Choose distances, angles, quantization levels, and (optionally) resize for faster or consistent results."
-        )
-        col_a, col_b = st.columns(2)
-        with col_a:
-            # Select images
-            use_all = st.checkbox("Use all images", value=True, key="har_use_all_moved")
-            if use_all:
-                image_indices = list(range(len(images)))
-            else:
-                image_indices = st.multiselect(
-                    "Select images",
-                    options=list(range(len(images))),
-                    format_func=lambda x: f"Image {x+1}",
-                    key="har_img_indices_moved",
+            try:
+                labels, preds = extract_haralick_texture(
+                    {"train_images": train_imgs, "train_labels": train_csv, "test_images": test_imgs}
                 )
-            # Levels
-            levels = st.selectbox("Quantization levels", [16, 32, 64, 128, 256], index=4, key="har_levels_moved")
-            # Distances
-            distances = st.multiselect("Distances (pixels)", [1, 2, 3, 5], default=[1, 2], key="har_distances_moved")
-        with col_b:
-            # Angles (radians)
-            angle_map = {
-                "0°": 0,
-                "45°": np.pi / 4,
-                "90°": np.pi / 2,
-                "135°": 3 * np.pi / 4,
-            }
-            selected_angle_names = st.multiselect(
-                "Angles",
-                options=list(angle_map.keys()),
-                default=["0°", "90°"],
-                key="har_angles_moved"
-            )
-            angles = [angle_map[name] for name in selected_angle_names]
-            # Resize option
-            resize_enabled = st.checkbox("Resize images", value=False, key="har_resize_enabled_moved")
-            if resize_enabled:
-                resize_width = st.number_input("Width", min_value=32, max_value=512, value=128, key="har_resize_width_moved")
-                resize_height = st.number_input("Height", min_value=32, max_value=512, value=128, key="har_resize_height_moved")
-                resize_dims = [resize_width, resize_height]
-            else:
-                resize_dims = None
-
-        if st.button("Extract Haralick (Table)", key="btn_haralick_table_moved"):
-            if image_indices and distances and angles:
-                params = {
-                    "image_indices": image_indices,
-                    "distances": distances,
-                    "angles": angles,
-                    "levels": levels,
-                }
-                if resize_dims:
-                    params["resize_dimensions"] = resize_dims
-
-                try:
-                    result = extract_haralick_features(params)
-                    # 'result' should have columns, rows, feature_names, etc.
-                    columns = result.get("columns", [])
-                    rows = result.get("rows", [])
-                    feature_names = result.get("feature_names", [])
-
-                    if columns and rows:
-                        st.success(f"Extracted {len(rows)} feature vectors with {len(columns)-1} features each.")
-                        # Build DataFrame
-                        import pandas as pd
-                        df = pd.DataFrame(rows, columns=columns)
-                        st.dataframe(df)
-
-                        # CSV download
-                        csv_bytes = _to_csv_bytes(columns, rows)
-                        st.download_button(
-                            "Download Haralick CSV",
-                            csv_bytes,
-                            file_name="haralick_features.csv",
-                            mime="text/csv",
-                        )
-
-                        # Show feature names
-                        if feature_names:
-                            with st.expander("Feature Descriptions"):
-                                for fname in feature_names:
-                                    st.write(f"- {fname}")
-                    else:
-                        st.warning("No features extracted. Check your parameters.")
-                except Exception as e:
-                    st.error(f"Haralick extraction failed: {e}")
-            else:
-                st.error("Please select images, distances, and angles.")
-
-        # --- Train/Predict workflow (unchanged logic, just relabeled) ---
-        st.markdown("---")
-        st.markdown("##### Train/Test Workflow (Upload External Images)")
-        st.caption("Upload separate training images + labels, then test images for prediction.")
-        col_train, col_test = st.columns(2)
-        with col_train:
-            train_imgs = st.file_uploader("Training Images", type=["png", "jpg", "jpeg"], accept_multiple_files=True, key="har_train_moved")
-            train_csv = st.file_uploader("Training Labels (CSV)", type="csv", key="har_train_csv_moved")
-        with col_test:
-            test_imgs = st.file_uploader("Test Images", type=["png", "jpg", "jpeg"], accept_multiple_files=True, key="har_test_moved")
-
-        # Keep key the same; only label changes
-        if st.button("Train & Predict", key="btn_haralick_moved"):
-            labels, preds = extract_haralick_texture(
-                {"train_images": train_imgs, "train_labels": train_csv, "test_images": test_imgs}
-            )
-            st.write("Predicted Labels:")
-            for i, p in enumerate(preds):
-                st.write(f"Test Image {i+1}: {p}")
-
-    # --- Co-Occurrence Texture ---
-    with tab6:
-        st.subheader("Co-Occurrence Texture Features")
-        tex_idx = st.selectbox(
-            "Select Image", options=list(range(len(images))), format_func=lambda x: f"Image {x+1}", key="tex_img_idx"
-        )
-        if st.button("Extract Co-Occurrence", key="btn_cooccurrence"):
-            features = extract_cooccurrence_texture({"image_index": tex_idx})
-            st.write("Texture Features:")
-            st.write(features)
+                
+                st.success(f"✅ Successfully trained classifier with {len(labels)} training samples")
+                
+                st.subheader("📊 Prediction Results:")
+                if preds:
+                    for i, prediction in enumerate(preds):
+                        # Predictions now come as "filename: predicted_class"
+                        st.write(f"🔍 {prediction}")
+                else:
+                    st.warning("No predictions were generated. Please check your test images.")
+                    
+            except Exception as e:
+                st.error(f"❌ Haralick prediction failed: {str(e)}")
+                st.info("💡 Make sure your CSV has the correct format: filename,label")
 
     # --- Local Binary Patterns (LBP) ---
-    with tab7:
-        st.subheader("Local Binary Patterns (LBP)")
+    with tab6:
+        st.subheader("🔢 Local Binary Patterns (LBP)")
 
         st.caption(
             "Compute LBP texture histograms. Choose parameters below and run on one, multiple, or all images. "
@@ -1394,7 +1406,11 @@ def render_feature_selection():
                             # Optional LBP-coded visualization
                             lbp_img_bytes = result.get("lbp_image_bytes")
                             if lbp_img_bytes:
-                                st.image(lbp_img_bytes, caption="LBP-coded image", use_container_width=False, width=400)
+                                st.image(lbp_img_bytes, caption="LBP-coded image", width=400)
+                                if st.button("Enlarge LBP Image", key="enlarge_lbp_single"):
+                                    st.session_state["fullscreen_image"] = lbp_img_bytes
+                                    st.session_state["fullscreen_section"] = "LBP-coded Image"
+                                    st.rerun()
 
                             # Download CSV
                             cols = [f"bin_{i}" for i in range(len(hist))]
@@ -1415,7 +1431,7 @@ def render_feature_selection():
                                 st.success(f"Computed LBP histograms for {len(rows)} image(s).")
                                 st.dataframe(
                                     {cols[i]: [row[i] for row in rows] for i in range(len(cols))},
-                                    use_container_width=True,
+                                    width='stretch',
                                 )
                                 csv_bytes = _to_csv_bytes(cols, rows)
                                 st.download_button(
@@ -1433,8 +1449,8 @@ def render_feature_selection():
                         st.error(f"LBP computation failed: {e}")
 
     # --- NEW: Contour Extraction (dedicated tab) ---
-    with tab8:
-        st.subheader("Contour Extraction")
+    with tab7:
+        st.subheader("⭕ Contour Extraction")
         st.caption(
             "Extract contours (closed shapes or outlines) from a binary or grayscale version of your image using "
             "OpenCV’s `findContours`. This is useful for shape analysis, counting objects, generating bounding boxes, "
@@ -1485,7 +1501,6 @@ def render_feature_selection():
                         st.image(
                             result["visualization_bytes"],
                             caption="Contours overlay",
-                            use_container_width=False,
                             width=400,
                         )
 
@@ -1506,8 +1521,8 @@ def render_feature_selection():
     # ----------------------------------------------------------------------
 #   Tab 8 – SIFT & Edge Detection
 # ----------------------------------------------------------------------
-    with tab9:
-        st.subheader("SIFT & Edge Detection")
+    with tab8:
+        st.subheader("🔍 SIFT & Edge Detection")
         st.caption(
             """
             *SIFT* extracts scale‑invariant key‑points and 128‑dimensional descriptors.  
@@ -1594,7 +1609,7 @@ def render_feature_selection():
                             st.image(
                                 viz,
                                 caption="SIFT key‑points (visualisation)",
-                                use_container_width=True,   # <-- NEW flag (no deprecation warning)
+                                width='stretch',
                             )
                         else:
                             st.info("No visualisation returned (you asked for several images).")
@@ -1637,7 +1652,7 @@ def render_feature_selection():
                             st.image(
                                 edge_imgs[0],
                                 caption=f"{edge_method.title()} edge map",
-                                use_container_width=True,
+                                width='stretch',
                             )
                         else:
                             st.warning("Backend returned no edge images.")
@@ -1703,7 +1718,7 @@ def render_feature_selection():
                 st.session_state["active_section"] = "Statistics Analysis"
 
     # --- Classifier Training ---
-    with tab10:
+    with tab9:
         st.subheader("Classifier Training")
         st.caption(
             "Label your uploaded images, pick a feature representation, and train a classical ML classifier. "
@@ -1793,7 +1808,7 @@ def render_feature_selection():
             },
             disabled=["image_index", "image_id"],
             hide_index=True,
-            use_container_width=True,
+            width='stretch',
             key="classifier_training_editor",
         )
 
@@ -1950,7 +1965,7 @@ def render_feature_selection():
                     "mobilenet_v2": "MobileNet V2 (1280-d)",
                 }[x],
                 index=0,
-                key="embedding_model",
+                key="classifier_embedding_model",
             )
 
         st.markdown("#### 3. Classifier Configuration")
@@ -2124,7 +2139,7 @@ def render_feature_selection():
                         }
                     )
                 st.caption("Holdout predictions")
-                st.dataframe(pd.DataFrame(pred_rows), use_container_width=True)
+                st.dataframe(pd.DataFrame(pred_rows), width='stretch')
 
         trained_model_id = st.session_state.get("trained_model_id")
         if trained_model_id:
@@ -2195,8 +2210,12 @@ def render_feature_selection():
                     }
                 )
             if prediction_rows:
-                st.dataframe(pd.DataFrame(prediction_rows), use_container_width=True)
+                st.dataframe(pd.DataFrame(prediction_rows), width='stretch')
             _render_metrics_section(latest_prediction.get("metrics"), "Prediction Metrics")
+    
+    # =========================
+    # Seher AI Social Chat Widget
+    # =========================
 
 
 # ---------- Utility ----------
