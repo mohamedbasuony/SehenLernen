@@ -9,11 +9,49 @@ from components.visualization import render_visualization
 from components.seher_smart_chat import render_smart_chat, update_chat_context, add_chat_message
 
 # --- Page Configuration ---
-st.set_page_config(page_title="Sehen Lernen", layout="wide")
+st.set_page_config(
+    page_title="Sehen Lernen", 
+    layout="wide",
+    initial_sidebar_state="expanded"
+)
 
-# --- Custom Button Styling ---
+# --- Global Responsive CSS and Button Styling ---
 st.markdown("""
 <style>
+    /* Global responsive settings */
+    .main .block-container {
+        max-width: 1200px;
+        padding-top: 2rem;
+        padding-bottom: 2rem;
+        padding-left: 1rem;
+        padding-right: 1rem;
+    }
+    
+    /* Responsive container adjustments */
+    @media (max-width: 768px) {
+        .main .block-container {
+            padding-left: 0.5rem;
+            padding-right: 0.5rem;
+            padding-top: 1rem;
+        }
+        
+        /* Adjust sidebar for mobile */
+        .css-1d391kg {
+            padding-top: 1rem;
+        }
+    }
+    
+    /* Ensure columns stack properly on mobile */
+    @media (max-width: 640px) {
+        .row-widget.stHorizontal {
+            flex-direction: column !important;
+        }
+        
+        .row-widget.stHorizontal > div {
+            width: 100% !important;
+            margin-bottom: 1rem;
+        }
+    }
     /* Style all buttons with the specified background color */
     .stButton > button {
         background-color: #F4F4F4 !important;
@@ -164,25 +202,193 @@ def _render_landing() -> None:
                 unsafe_allow_html=True,
             )
 
-    # Fixed footer
+    # Sticky footer that sticks to bottom and fits all screen widths
     st.markdown(
         """
-        <div style="
-            position: fixed; bottom: 0; left: 0; right: 0;
-            background-color: #f0f2f6; border-top: 2px solid #e6e9ef;
-            padding: 2rem 2rem; z-index: 1000; box-shadow: 0 -2px 10px rgba(0,0,0,0.1);
-            height: 25vh; display: flex; align-items: center;">
-            <div style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 3rem; max-width: 1200px; margin: 0 auto; width: 100%;">
-                <div style="text-align: center;">
-                    <strong style='color: #2c3e50; font-size: 1.4rem; margin-bottom: 1rem; display: block;'>About the Project</strong>
-                    <p style='color: #555; font-size: 1rem; line-height: 1.5; margin: 0;'>
+        <style>
+        .sticky-footer {
+            position: relative;
+            width: 100vw; /* Full viewport width */
+            background-color: #f0f2f6;
+            border-top: 2px solid #e6e9ef;
+            box-shadow: 0 -2px 8px rgba(0,0,0,0.1);
+            margin-top: 4.75rem; /* Reduced by another ~20px */
+            margin-left: calc(-50vw + 50%); /* Center full-width element */
+            margin-bottom: 0 !important; /* Force no bottom margin */
+            padding: 1rem 0.8rem;
+            padding-bottom: 1rem !important; /* Exact padding, no more */
+            /* Make this the absolute last element */
+            display: block;
+            clear: both;
+        }
+        
+        /* Ensure nothing comes after the footer */
+        .sticky-footer::after {
+            content: "";
+            display: block;
+            height: 0;
+            clear: both;
+        }
+        
+        .footer-content {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+            gap: 1rem;
+            max-width: 1400px;
+            margin: 0 auto;
+            width: calc(100% - 1.6rem); /* Account for padding */
+            padding: 0 0.8rem;
+        }
+        
+        .footer-section {
+            text-align: center;
+            padding: 0.3rem; /* More compact padding */
+        }
+        
+        .footer-title {
+            color: #2c3e50;
+            font-size: clamp(1rem, 2.2vw, 1.2rem); /* Smaller title */
+            font-weight: 600;
+            margin-bottom: 0.5rem; /* Less margin */
+            display: block;
+            border-bottom: 1px solid #3498db; /* Thinner border */
+            padding-bottom: 0.2rem;
+        }
+        
+        .footer-text {
+            color: #555;
+            font-size: clamp(0.8rem, 1.8vw, 0.9rem); /* Smaller text */
+            line-height: 1.4; /* Tighter line height */
+            margin: 0;
+        }
+        
+        .footer-links {
+            color: #555;
+            font-size: clamp(0.8rem, 1.8vw, 0.9rem); /* Smaller text */
+            line-height: 1.4; /* Tighter line height */
+        }
+        
+        .footer-links a {
+            color: #3498db;
+            text-decoration: none;
+            transition: color 0.3s ease;
+        }
+        
+        .footer-links a:hover {
+            color: #2980b9;
+            text-decoration: underline;
+        }
+        
+        /* Responsive adjustments */
+        @media (max-width: 768px) {
+            .sticky-footer {
+                padding: 0.8rem 0.4rem;
+                padding-bottom: 0.8rem; /* No extra bottom padding */
+                margin-top: 3.25rem; /* Brought up by another ~20px on tablet */
+                margin-bottom: 0;
+            }
+            
+            .footer-content {
+                grid-template-columns: 1fr;
+                gap: 0.8rem;
+                width: calc(100% - 0.8rem);
+                padding: 0 0.4rem;
+            }
+            
+            .footer-section {
+                padding: 0.2rem;
+            }
+        }
+        
+        @media (max-width: 480px) {
+            .sticky-footer {
+                padding: 0.6rem 0.3rem;
+                padding-bottom: 0.6rem; /* No extra bottom padding */
+                margin-top: 1.25rem; /* Brought up by another ~20px on mobile */
+                margin-bottom: 0;
+            }
+            
+            .footer-content {
+                gap: 0.6rem;
+                width: calc(100% - 0.6rem);
+                padding: 0 0.3rem;
+            }
+        }
+        
+        /* Ensure proper page flow - page ends at footer */
+        .main .block-container {
+            min-height: auto; /* Remove fixed height */
+        }
+        
+        /* Force page height to end exactly at footer */
+        html {
+            height: auto !important;
+        }
+        
+        body {
+            height: auto !important;
+            min-height: auto !important;
+        }
+        
+        #root {
+            height: auto !important;
+            min-height: auto !important;
+        }
+        
+        /* Remove padding since footer is no longer floating */
+        .stApp > div {
+            padding-bottom: 0 !important;
+        }
+        
+        .main .block-container {
+            padding-bottom: 0 !important;
+        }
+        
+        /* Ensure no whitespace below footer - eliminate all trailing space */
+        body, html {
+            margin: 0 !important;
+            padding: 0 !important;
+            margin-bottom: 0 !important;
+            padding-bottom: 0 !important;
+            height: auto !important;
+            overflow-x: hidden !important;
+        }
+        
+        .stApp {
+            margin-bottom: 0 !important;
+            padding-bottom: 0 !important;
+        }
+        
+        /* Force page to end exactly at footer */
+        .stApp > div:last-child {
+            margin-bottom: 0 !important;
+            padding-bottom: 0 !important;
+        }
+        
+        /* Remove any default Streamlit bottom spacing */
+        .main, .main > div, .block-container {
+            margin-bottom: 0 !important;
+            padding-bottom: 0 !important;
+        }
+        
+        /* Remove body margins since footer is no longer floating */
+        body {
+            margin-bottom: 0;
+        }
+        </style>
+        
+        <div class="sticky-footer">
+            <div class="footer-content">
+                <div class="footer-section">
+                    <strong class="footer-title">About the Project</strong>
+                    <p class="footer-text">
                         Sehen Lernen explores the fascinating intersection of human and artificial intelligence in visual perception.
                         Our platform provides tools for comparative analysis and interactive learning.
                     </p>
                 </div>
-                <div style="text-align: center;">
-                    <strong style='color: #2c3e50; font-size: 1.4rem; margin-bottom: 1rem; display: block;'>Team Members</strong>
-                    <div style='color: #555; font-size: 1rem; line-height: 1.8;'>
+                <div class="footer-section">
+                    <strong class="footer-title">Team Members</strong>
+                    <div class="footer-links">
                         <div>Prof. Dr. Martin Langner</div>
                         <div>Mohamed Basuony</div>
                         <div>Marta Kipke</div>
@@ -190,14 +396,14 @@ def _render_landing() -> None:
                         <div>Alexander Zeckey</div>
                     </div>
                 </div>
-                <div style="text-align: center;">
-                    <strong style='color: #2c3e50; font-size: 1.4rem; margin-bottom: 1rem; display: block;'>Contact & Info</strong>
-                    <div style='color: #555; font-size: 1rem; line-height: 1.8;'>
-                        <div>📧 martin.langner@uni-goettingen.de</div>
-                        <div>🌐 <a href="https://www.uni-goettingen.de/de/597374.html" target="_blank" style="color:#555;text-decoration:none;">uni-goettingen.de</a></div>
+                <div class="footer-section">
+                    <strong class="footer-title">Contact & Info</strong>
+                    <div class="footer-links">
+                        <div>📧 <a href="mailto:martin.langner@uni-goettingen.de">martin.langner@uni-goettingen.de</a></div>
+                        <div>🌐 <a href="https://www.uni-goettingen.de/de/597374.html" target="_blank">uni-goettingen.de</a></div>
                         <div>📍 Institut für Digital Humanities</div>
                         <div>🏛️ University of Göttingen</div>
-                        <div style='margin-top: 1rem; font-weight: 600;'>© 2025 Sehen Lernen Project</div>
+                        <div style="margin-top: 0.8rem; font-weight: 600; color: #2c3e50;">© 2025 Sehen Lernen Project</div>
                     </div>
                 </div>
             </div>

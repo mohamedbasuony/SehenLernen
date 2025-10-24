@@ -29,16 +29,24 @@ class SeherSmartChat:
         is_expanded = st.session_state.get(self.visible_key, False)
         
         if not is_expanded:
-            # Collapsed - show button in sidebar or bottom
-            col1, col2, col3 = st.columns([8, 1, 1])
+            # Collapsed - show button in bottom-right with responsive positioning
+            col1, col2, col3 = st.columns([7, 2, 1])
             with col3:
                 if st.button("💬", key="seher_toggle", help="Open Seher Assistant"):
                     st.session_state[self.visible_key] = True
                     st.rerun()
         else:
-            # Expanded - show chat window
-            col1, col2 = st.columns([6, 4])
-            with col2:
+            # Expanded - show chat window with responsive layout
+            # On mobile: full width, on desktop: right column
+            if st.session_state.get('mobile_view', False):
+                # Full width on mobile
+                chat_container = st.container()
+            else:
+                # Right column on desktop
+                col1, col2 = st.columns([5, 5])  # More balanced columns
+                chat_container = col2
+            
+            with chat_container:
                 # Header
                 h1, h2 = st.columns([3, 1])
                 with h1:
