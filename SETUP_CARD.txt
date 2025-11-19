@@ -1,0 +1,185 @@
+# SEHEN LERNEN - SETUP CARD
+
+## Quick Reference (Print & Keep!)
+
+---
+
+### ⚡ FIRST TIME SETUP
+
+#### Windows:
+```
+1. Double-click: SETUP_WINDOWS.bat
+2. Wait 5-10 minutes
+3. Window closes when done
+```
+
+#### Mac/Linux:
+```
+1. Open Terminal
+2. bash setup_mac.sh
+3. Wait 5-10 minutes
+4. Press Enter when done
+```
+
+---
+
+### 🚀 EVERY TIME YOU START
+
+#### Windows:
+```
+1. Double-click: START_APP.bat
+2. Wait 10 seconds
+3. Browser opens to app
+```
+
+#### Mac/Linux:
+```
+1. Open Terminal
+2. bash start_app.sh
+3. Wait 10 seconds
+4. Browser opens to app
+```
+
+---
+
+### 📍 WHAT TO EXPECT
+
+**Backend Window:**
+- Shows lots of logs
+- You should see: "Application startup complete"
+- Don't close this!
+
+**Frontend Window:**
+- Shows fewer messages
+- You should see: "Local URL: http://localhost:8501"
+- Don't close this!
+
+**Browser:**
+- Should open automatically
+- If not: Go to http://localhost:8501
+- You're ready when you see the interface!
+
+---
+
+### 🛑 STOPPING
+
+Close both:
+1. Backend Command Prompt/Terminal
+2. Frontend Command Prompt/Terminal
+
+Or press: Ctrl+C in each window
+
+---
+
+### ⚠️ QUICK FIXES
+
+| Problem | Solution |
+|---------|----------|
+| "Python not found" | Install Python from python.org |
+| "Port already in use" | Close other applications using ports |
+| Frontend keeps reloading | Wait 20 seconds, close browser, reopen |
+| Backend not showing | Wait 5 seconds, both windows should open |
+| Nothing happens | Try running again, wait longer |
+
+---
+
+### 📞 GETTING HELP
+
+**If stuck:**
+1. Check the printed TROUBLESHOOTING.md guide
+2. Screenshot the error message
+3. Ask instructor/TA
+4. Provide: What happened, what you did, error message
+
+---
+
+### ✅ SUCCESS CHECKLIST
+
+Do you see:
+- [ ] Backend window opened
+- [ ] Frontend window opened
+- [ ] Browser opened automatically
+- [ ] No error messages (just lots of logs)
+- [ ] Can click buttons on website
+
+If YES → Setup complete! ✓
+
+If NO → See TROUBLESHOOTING.md
+
+---
+
+### 🎯 USING THE APP
+
+1. **Upload Image** - Click "Browse files" and pick an image
+2. **Select Feature** - Choose what to analyze
+3. **Run Analysis** - Click the feature button
+4. **See Results** - Results appear below
+5. **Download** - Click "Download" to save results
+
+---
+
+### 💡 TIPS
+
+- First run takes longer (loads ML models)
+- Smaller images process faster
+- Supported formats: JPEG, PNG, BMP, TIFF
+- Max file size: 50 MB (1-20 MB recommended)
+- All processing happens on your computer (no internet needed)
+
+---
+
+### 🔗 ACCESSING FROM ANOTHER COMPUTER
+
+**Same network:**
+1. Find IP: Run `ipconfig` (Windows) or `ifconfig` (Mac/Linux)
+2. Look for: 192.168.x.x or 10.0.x.x
+3. Other computer: Go to `http://YOUR_IP:8501`
+   - Example: `http://192.168.1.100:8501`
+
+---
+
+### 📁 IMPORTANT FILES
+
+- `QUICK_START.md` - Full getting started guide
+- `TROUBLESHOOTING.md` - Problem solver (very helpful!)
+- `DEPLOYMENT_GUIDE.md` - Advanced setup options
+
+---
+
+### 🆘 WHEN NOTHING WORKS
+
+**Step-by-step recovery:**
+1. Close all Command Prompt/Terminal windows
+2. Wait 5 seconds
+3. Run START_APP.bat or bash start_app.sh again
+4. Wait 20 seconds
+5. Try again in browser
+
+**Still stuck?**
+1. Take screenshot of error
+2. Open `TROUBLESHOOTING.md`
+3. Search for your error
+4. Follow suggested fix
+
+---
+
+### 🎓 REMEMBER
+
+- This is educational software
+- It's safe (all data stays on your computer)
+- Experiment freely!
+- Ask questions
+- Report any bugs/issues
+
+---
+
+**Version**: 1.0  
+**App**: Sehen Lernen (Learning to See)  
+**Your friendly computer vision lab assistant** 🎓
+
+---
+
+**KEEP THIS CARD HANDY DURING LAB!**
+
+Cut here to make wallet-sized card if desired:
+---

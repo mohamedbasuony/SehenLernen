@@ -138,19 +138,63 @@ def perform_kmeans_service(
     scaled = StandardScaler().fit_transform(X)
     pca = PCA(n_components=2)
     reduced = pca.fit_transform(scaled)
-    kmeans = KMeans(n_clusters=n_clusters, random_state=random_state)
+    kmeans = KMeans(n_clusters=n_clusters, random_state=random_state, n_init=10)
     labels = kmeans.fit_predict(reduced)
 
-    # Plot
-    fig, ax = plt.subplots()
+    # Create a more prominent scatter plot with clusters
+    fig, ax = plt.subplots(figsize=(12, 8))
+    
+    # Define distinct colors for clusters
+    colors = plt.cm.tab20(np.linspace(0, 1, n_clusters))
+    
+    # Plot each cluster with distinct colors
     for i in range(n_clusters):
-        ax.scatter(reduced[labels == i, 0], reduced[labels == i, 1], label=f"Cluster {i}", alpha=0.7)
-    ax.scatter(kmeans.cluster_centers_[:, 0], kmeans.cluster_centers_[:, 1], marker='*', s=200, c='red')
-    ax.set_xlabel("PC1")
-    ax.set_ylabel("PC2")
-    ax.legend()
+        mask = labels == i
+        ax.scatter(
+            reduced[mask, 0], 
+            reduced[mask, 1], 
+            c=[colors[i]], 
+            label=f"Cluster {i} ({np.sum(mask)} images)", 
+            s=300,  # Larger point size
+            alpha=0.7,
+            edgecolors='black',
+            linewidth=1.5
+        )
+    
+    # Plot cluster centers with large red stars
+    ax.scatter(
+        kmeans.cluster_centers_[:, 0], 
+        kmeans.cluster_centers_[:, 1], 
+        marker='*', 
+        s=1000,  # Very large marker for centroids
+        c='red', 
+        edgecolors='darkred',
+        linewidth=2,
+        label='Centroids',
+        zorder=10
+    )
+    
+    # Add labels to each point showing image number
+    for idx, (x, y) in enumerate(reduced):
+        ax.annotate(
+            f"Img {idx+1}", 
+            (x, y), 
+            fontsize=8, 
+            ha='center', 
+            va='center',
+            bbox=dict(boxstyle='round,pad=0.3', facecolor='yellow', alpha=0.5)
+        )
+    
+    ax.set_xlabel(f"PC1 ({pca.explained_variance_ratio_[0]:.1%} variance)", fontsize=12, fontweight='bold')
+    ax.set_ylabel(f"PC2 ({pca.explained_variance_ratio_[1]:.1%} variance)", fontsize=12, fontweight='bold')
+    ax.set_title(f"K-Means Clustering (k={n_clusters})\n{len(selected_ids)} images grouped into {n_clusters} clusters", 
+                 fontsize=14, fontweight='bold')
+    ax.legend(loc='best', fontsize=10, framealpha=0.9)
+    ax.grid(True, alpha=0.3, linestyle='--')
+    
+    plt.tight_layout()
     buf = io.BytesIO()
-    fig.savefig(buf, format="png")
+    fig.savefig(buf, format="png", dpi=150, bbox_inches='tight')
     plt.close(fig)
     plot_b64 = base64.b64encode(buf.getvalue()).decode()
 
@@ -904,10 +948,26 @@ def extract_contours_service(
     min_area: int = 10,
     return_bounding_boxes: bool = True,
     return_hierarchy: bool = False,
+    threshold_value: int = 127,
+    binarization_method: str = "FIXED",
+    canny_low: int = 50,
+    canny_high: int = 150,
 ) -> Dict[str, Any]:
     """
     Extract contours from a binary/grayscale image using OpenCV findContours.
     Returns contour point sets, areas, optional bounding boxes & hierarchy, and a PNG overlay.
+    
+    Args:
+        image_index: Index of image to process
+        mode: Contour retrieval mode (RETR_EXTERNAL, RETR_LIST, RETR_TREE, RETR_CCOMP)
+        method: Contour approximation method (CHAIN_APPROX_NONE, CHAIN_APPROX_SIMPLE)
+        min_area: Minimum contour area to keep
+        return_bounding_boxes: Whether to return bounding boxes
+        return_hierarchy: Whether to return hierarchy
+        threshold_value: Fixed threshold value (0-255) for FIXED method
+        binarization_method: Method for binarization (FIXED, OTSU, CANNY, ADAPTIVE)
+        canny_low: Low threshold for Canny edge detection
+        canny_high: High threshold for Canny edge detection
     """
     mode_map = {
         "RETR_EXTERNAL": cv2.RETR_EXTERNAL,
@@ -929,33 +989,82 @@ def extract_contours_service(
         raise IndexError("image_index out of range")
 
     img_bytes = load_image(img_ids[image_index])
-    arr = cv2.imdecode(np.frombuffer(img_bytes, np.uint8), cv2.IMREAD_GRAYSCALE)
-    if arr is None:
+    
+    # Load as COLOR image first (RGB has more information for edge detection)
+    img_bgr = cv2.imdecode(np.frombuffer(img_bytes, np.uint8), cv2.IMREAD_COLOR)
+    if img_bgr is None:
         raise ValueError("Could not decode image.")
+    
+    img_rgb = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2RGB)
+    arr = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2GRAY)  # Convert to grayscale for processing
 
-    # Simple fixed threshold to binary; can be enhanced later to Otsu/Adaptive if needed
-    _, binary = cv2.threshold(arr, 127, 255, cv2.THRESH_BINARY)
+    # Choose binarization method
+    if binarization_method == "CANNY":
+        # Canny edge detection - finds edges directly (BEST for actual objects)
+        # Apply slight blur first for better edge detection
+        blurred = cv2.GaussianBlur(arr, (5, 5), 1)
+        binary = cv2.Canny(blurred, canny_low, canny_high)
+        
+    elif binarization_method == "OTSU":
+        # Otsu's automatic thresholding with preprocessing
+        blurred = cv2.GaussianBlur(arr, (5, 5), 0)
+        _, binary = cv2.threshold(blurred, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+        
+    elif binarization_method == "ADAPTIVE":
+        # Adaptive thresholding with preprocessing
+        blurred = cv2.GaussianBlur(arr, (5, 5), 0)
+        binary = cv2.adaptiveThreshold(blurred, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY, 11, 2)
+        
+    else:  # FIXED
+        # FIXED threshold with preprocessing
+        blurred = cv2.GaussianBlur(arr, (5, 5), 0)
+        _, binary = cv2.threshold(blurred, threshold_value, 255, cv2.THRESH_BINARY)
+
+    # Apply morphological operations to clean up the binary image
+    kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (5, 5))
+    binary = cv2.morphologyEx(binary, cv2.MORPH_CLOSE, kernel)  # Close small holes
+    binary = cv2.morphologyEx(binary, cv2.MORPH_OPEN, kernel)   # Remove small noise
 
     contours, hierarchy = cv2.findContours(binary, mode_map[mode], method_map[method])
 
+    # Filter contours: remove those touching image border and too large
     kept_contours = []
     bounding_boxes = []
     areas = []
+    height, width = binary.shape
+    border_margin = 2  # pixels from edge
+    
     for c in contours:
         area = float(cv2.contourArea(c))
         if area < (min_area or 0):
             continue
-        kept_contours.append(c)  # keep cv2 contour for drawing later
+        
+        # Skip contours that touch the image border (these are usually image edges)
+        x, y, w, h = cv2.boundingRect(c)
+        touches_border = (x <= border_margin or 
+                         y <= border_margin or 
+                         (x + w) >= width - border_margin or 
+                         (y + h) >= height - border_margin)
+        
+        # Skip if too large (likely the whole image)
+        image_area = height * width
+        if area > 0.95 * image_area:
+            continue
+        
+        if touches_border and mode == "RETR_EXTERNAL":
+            # For EXTERNAL mode, skip border contours
+            continue
+            
+        kept_contours.append(c)
         areas.append(area)
         if return_bounding_boxes:
-            x, y, w, h = cv2.boundingRect(c)
             bounding_boxes.append([int(x), int(y), int(w), int(h)])
 
     # Build results as plain lists (x,y pairs)
     results_points = [kc.squeeze().tolist() for kc in kept_contours]
 
-    # Make overlay that only shows kept contours (green)
-    overlay = cv2.cvtColor(arr, cv2.COLOR_GRAY2BGR)
+    # Make overlay that shows the binary image and contours
+    overlay = cv2.cvtColor(binary, cv2.COLOR_GRAY2BGR)
     if kept_contours:
         cv2.drawContours(overlay, kept_contours, -1, (0, 255, 0), 2)
     overlay_rgb = cv2.cvtColor(overlay, cv2.COLOR_BGR2RGB)

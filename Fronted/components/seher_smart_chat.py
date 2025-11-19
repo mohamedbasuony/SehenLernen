@@ -248,17 +248,24 @@ It analyzes visual features (colors, shapes, textures, objects) to find images t
 **Example questions:** "How does similarity search work?", "What's the difference between CNN and SIFT features?", "How do I choose the right number of clusters?"
 """
 
-# Global instance
-_seher_chat = SeherSmartChat()
+# Module-level variable to hold instance (lazy loaded)
+_seher_chat = None
+
+def _get_seher_chat():
+    global _seher_chat
+    if _seher_chat is None:
+        _seher_chat = SeherSmartChat()
+    return _seher_chat
 
 def render_smart_chat():
-    _seher_chat.render()
+    _get_seher_chat().render()
 
 def update_chat_context(tab: str, details: list = None):
-    _seher_chat.update_context(tab, details)
+    _get_seher_chat().update_context(tab, details)
 
 def add_chat_message(message: str):
-    _seher_chat._ensure_initialized()
-    st.session_state[_seher_chat.messages_key].append({
+    chat = _get_seher_chat()
+    chat._ensure_initialized()
+    st.session_state[chat.messages_key].append({
         "role": "assistant", "content": message, "timestamp": datetime.now()
     })

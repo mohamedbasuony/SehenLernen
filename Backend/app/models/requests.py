@@ -166,6 +166,9 @@ class ContourRequest(BaseModel):
     - image_index: index of the image in the current dataset
     - mode: Contour retrieval mode (cv2.RETR_EXTERNAL, RETR_LIST, RETR_TREE, RETR_CCOMP)
     - method: Approximation method (cv2.CHAIN_APPROX_NONE, CHAIN_APPROX_SIMPLE)
+    - binarization_method: How to convert to binary (FIXED, OTSU, ADAPTIVE, CANNY)
+    - threshold_value: For FIXED method (0-255)
+    - canny_low/canny_high: For CANNY method
     """
     image_index: int
     mode: Literal["RETR_EXTERNAL", "RETR_LIST", "RETR_TREE", "RETR_CCOMP"] = "RETR_EXTERNAL"
@@ -173,6 +176,10 @@ class ContourRequest(BaseModel):
     min_area: Optional[int] = 10  # filter out tiny contours
     return_bounding_boxes: bool = True
     return_hierarchy: bool = False
+    binarization_method: Literal["FIXED", "OTSU", "ADAPTIVE", "CANNY"] = "OTSU"
+    threshold_value: int = Field(default=127, ge=0, le=255, description="For FIXED method")
+    canny_low: int = Field(default=50, ge=0, le=200, description="For CANNY method")
+    canny_high: int = Field(default=150, ge=50, le=500, description="For CANNY method")
 
 
 class SimilaritySearchRequest(BaseModel):

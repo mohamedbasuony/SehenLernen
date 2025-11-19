@@ -238,6 +238,10 @@ def contour_extract(req: ContourRequest):
             min_area=req.min_area or 10,
             return_bounding_boxes=req.return_bounding_boxes,
             return_hierarchy=req.return_hierarchy,
+            binarization_method=req.binarization_method,
+            threshold_value=req.threshold_value,
+            canny_low=req.canny_low,
+            canny_high=req.canny_high,
         )
         return result
     except Exception as e:

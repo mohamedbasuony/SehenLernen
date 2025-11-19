@@ -601,25 +601,49 @@ def render_feature_selection():
                             "use_all_images": all_images_checkbox,
                         }
                         plot_bytes, assignments = perform_kmeans(params)
-                        st.image(plot_bytes, caption="Multi-Image K-means Clustering", width=400)
-                        if st.button("Enlarge K-means Plot", key="enlarge_kmeans_plot"):
-                            st.session_state["fullscreen_image"] = plot_bytes
-                            st.session_state["fullscreen_section"] = "K-means Clustering"
-                            st.rerun()
-                        st.write("Cluster Assignments:")
-
-                        if "metadata_df" in st.session_state and "image_id_col" in st.session_state:
-                            metadata = st.session_state["metadata_df"]
-                            id_col = st.session_state["image_id_col"]
-                            image_ids = metadata[id_col].tolist()
-                            for idx, label in enumerate(assignments):
-                                image_name = image_ids[idx] if idx < len(image_ids) else f"Image {idx+1}"
-                                st.write(f"{image_name} → Cluster {label}")
-                        else:
-                            for idx, label in enumerate(assignments):
-                                st.write(f"Image {idx+1} → Cluster {label}")
+                        st.session_state["kmeans_plot"] = plot_bytes
+                        st.session_state["kmeans_assignments"] = assignments
+                        st.success("K-means clustering completed!")
                     except Exception as e:
                         st.error(f"Error performing multi-image K-means clustering: {str(e)}")
+        
+        # Display K-means results if available
+        if st.session_state.get("kmeans_plot"):
+            st.subheader("K-means Clustering Results")
+            col1, col2 = st.columns([3, 1])
+            with col1:
+                st.image(st.session_state["kmeans_plot"], caption="Multi-Image K-means Clustering Graph", width=600)
+            with col2:
+                if st.button("📊 Enlarge Graph", key="enlarge_kmeans_plot", use_container_width=True):
+                    st.session_state["fullscreen_image"] = st.session_state["kmeans_plot"]
+                    st.session_state["fullscreen_section"] = "K-means Clustering"
+                    st.rerun()
+            
+            # Display cluster assignments
+            st.subheader("Cluster Assignments")
+            assignments = st.session_state.get("kmeans_assignments", [])
+            
+            if "metadata_df" in st.session_state and "image_id_col" in st.session_state:
+                metadata = st.session_state["metadata_df"]
+                id_col = st.session_state["image_id_col"]
+                image_ids = metadata[id_col].tolist()
+                
+                # Create a nice table view
+                assignment_data = []
+                for idx, label in enumerate(assignments):
+                    image_name = image_ids[idx] if idx < len(image_ids) else f"Image {idx+1}"
+                    assignment_data.append({"Image": image_name, "Cluster": label})
+                
+                df_assignments = pd.DataFrame(assignment_data)
+                st.dataframe(df_assignments, use_container_width=True)
+            else:
+                # Simple text display
+                assignment_data = []
+                for idx, label in enumerate(assignments):
+                    assignment_data.append({"Image": f"Image {idx+1}", "Cluster": label})
+                
+                df_assignments = pd.DataFrame(assignment_data)
+                st.dataframe(df_assignments, use_container_width=True)
         
         else:  # Single Image Segmentation
             st.markdown("### Image Selection")
@@ -652,29 +676,59 @@ def render_feature_selection():
                             "max_pixels": max_pixels,
                         }
                         segmented_bytes, plot_bytes = perform_single_image_kmeans(params)
-                        
-                        # Display comparison plot
-                        st.image(plot_bytes, caption="Original vs Segmented Image", width=600)
-                        
-                        if st.button("Enlarge Segmentation Plot", key="enlarge_segmentation_plot"):
-                            st.session_state["fullscreen_image"] = plot_bytes
-                            st.session_state["fullscreen_section"] = "K-means Segmentation"
-                            st.rerun()
-                        
-                        # Display segmented image separately
-                        st.subheader("Segmented Image")
-                        st.image(segmented_bytes, caption=f"Color Segmentation (k={cluster_count})", width=400)
-                        
-                        # Download option
-                        st.download_button(
-                            label="Download Segmented Image",
-                            data=segmented_bytes,
-                            file_name=f"segmented_image_k{cluster_count}.png",
-                            mime="image/png"
-                        )
+                        st.session_state["kmeans_segmentation_plot"] = plot_bytes
+                        st.session_state["kmeans_segmented_image"] = segmented_bytes
+                        st.session_state["kmeans_cluster_count"] = cluster_count
+                        st.success("K-means segmentation completed!")
                         
                     except Exception as e:
                         st.error(f"Error performing single image segmentation: {str(e)}")
+        
+        # Display segmentation results if available
+        if st.session_state.get("kmeans_segmentation_plot"):
+            st.subheader("K-means Segmentation Results")
+            
+            # Display comparison plot with enlarge button
+            col1, col2 = st.columns([3, 1])
+            with col1:
+                st.image(st.session_state["kmeans_segmentation_plot"], caption="Original vs Segmented Comparison", width=600)
+            with col2:
+                if st.button("📊 Enlarge Comparison", key="enlarge_segmentation_plot", use_container_width=True):
+                    st.session_state["fullscreen_image"] = st.session_state["kmeans_segmentation_plot"]
+                    st.session_state["fullscreen_section"] = "K-means Segmentation"
+                    st.rerun()
+            
+            # Display segmented image separately
+            st.subheader("Segmented Image (Color Quantization)")
+            col1, col2 = st.columns([3, 1])
+            with col1:
+                st.image(st.session_state["kmeans_segmented_image"], 
+                        caption=f"Color Segmentation (k={st.session_state.get('kmeans_cluster_count', 2)})", 
+                        width=600)
+            with col2:
+                if st.button("📊 Enlarge Segmented", key="enlarge_segmented_image", use_container_width=True):
+                    st.session_state["fullscreen_image"] = st.session_state["kmeans_segmented_image"]
+                    st.session_state["fullscreen_section"] = "Segmented Image"
+                    st.rerun()
+            
+            # Download options
+            col1, col2 = st.columns(2)
+            with col1:
+                st.download_button(
+                    label="⬇️ Download Comparison",
+                    data=st.session_state["kmeans_segmentation_plot"],
+                    file_name=f"kmeans_comparison_k{st.session_state.get('kmeans_cluster_count', 2)}.png",
+                    mime="image/png",
+                    use_container_width=True
+                )
+            with col2:
+                st.download_button(
+                    label="⬇️ Download Segmented Image",
+                    data=st.session_state["kmeans_segmented_image"],
+                    file_name=f"kmeans_segmented_k{st.session_state.get('kmeans_cluster_count', 2)}.png",
+                    mime="image/png",
+                    use_container_width=True
+                )
 
     # --- Shape Features ---
     with tab3:
@@ -1483,6 +1537,53 @@ def render_feature_selection():
         return_bb = st.checkbox("Return bounding boxes", value=True, key="contour_return_bb")
         return_hier = st.checkbox("Return hierarchy (OpenCV format)", value=False, key="contour_return_hier")
 
+        # Binarization method selection
+        st.markdown("### Binarization Method")
+        binarization_method = st.radio(
+            "How to convert image to binary (black & white):",
+            ["FIXED", "OTSU", "ADAPTIVE", "CANNY"],
+            help="""
+            - **FIXED**: Simple threshold at value you set (fast but less accurate)
+            - **OTSU**: Automatic threshold (good for most cases)
+            - **ADAPTIVE**: Local thresholding (better with uneven lighting)
+            - **CANNY**: Edge detection (finds object boundaries)
+            """,
+            key="contour_binarization_method"
+        )
+        
+        # Threshold controls based on method
+        if binarization_method == "FIXED":
+            threshold_value = st.slider(
+                "Threshold Value (0=black, 255=white)", 
+                min_value=0, 
+                max_value=255, 
+                value=127,
+                help="Pixels above this value become white, below become black",
+                key="contour_threshold_value"
+            )
+        elif binarization_method == "CANNY":
+            col1, col2 = st.columns(2)
+            with col1:
+                canny_low = st.slider(
+                    "Canny Low Threshold",
+                    min_value=0,
+                    max_value=200,
+                    value=50,
+                    key="contour_canny_low"
+                )
+            with col2:
+                canny_high = st.slider(
+                    "Canny High Threshold",
+                    min_value=50,
+                    max_value=500,
+                    value=150,
+                    key="contour_canny_high"
+                )
+        else:
+            threshold_value = 127  # Not used for OTSU or ADAPTIVE
+            canny_low = 50
+            canny_high = 150
+
         if st.button("Run Contour Extraction", key="btn_contour_extract"):
             with st.spinner("Extracting contours..."):
                 try:
@@ -1493,8 +1594,14 @@ def render_feature_selection():
                         "min_area": int(min_area),
                         "return_bounding_boxes": bool(return_bb),
                         "return_hierarchy": bool(return_hier),
+                        "binarization_method": binarization_method,
+                        "threshold_value": int(threshold_value) if binarization_method == "FIXED" else 127,
+                        "canny_low": int(canny_low) if binarization_method == "CANNY" else 50,
+                        "canny_high": int(canny_high) if binarization_method == "CANNY" else 150,
                     }
                     result = extract_contours(params)
+                    st.session_state["contour_result"] = result
+                    st.success("Contour extraction completed!")
 
                     # Preview overlay
                     if result.get("visualization_bytes"):

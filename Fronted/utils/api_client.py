@@ -9,7 +9,7 @@ from PIL import Image
 
 
 def _get_base_url():
-    return os.getenv("SEHEN_LERNEN_API_URL", "http://localhost:8000")
+    return os.getenv("SEHEN_LERNEN_API_URL", "https://basuony-sehenlernen.hf.space")
 
 
 def get_current_image_ids():
