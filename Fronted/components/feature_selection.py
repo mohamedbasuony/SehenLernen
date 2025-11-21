@@ -1122,7 +1122,7 @@ def render_feature_selection():
                                 st.info("💡 Make sure you have uploaded images and selected a valid query image.")
                             elif "404" in error_msg:
                                 st.error("❌ Similarity search service not available.")
-                                st.info("💡 Check if the backend server is running on http://localhost:8000")
+                                st.info("💡 Check if the backend server is running on http://134.76.20.16:8000")
                             elif "500" in error_msg:
                                 st.error("❌ Internal server error occurred.")
                                 st.info("💡 Try precomputing features first or check backend logs.")
@@ -1236,7 +1236,7 @@ def render_feature_selection():
                                 st.info("💡 Make sure you have selected two different valid images.")
                             elif "404" in error_msg:
                                 st.error("❌ Similarity search service not available.")
-                                st.info("💡 Check if the backend server is running on http://localhost:8000")
+                                st.info("💡 Check if the backend server is running on http://134.76.20.16:8000")
                             elif "500" in error_msg:
                                 st.error("❌ Internal server error during comparison.")
                                 st.info("💡 Try precomputing features first or check backend logs.")

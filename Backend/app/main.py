@@ -24,10 +24,15 @@ app = FastAPI(
 )
 
 # --- CORS Middleware ---
-# Only allow the Streamlit frontend (localhost:8501) to make requests with credentials
+# Allow the Streamlit frontend from local and VM deployment to make requests
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:8501"],
+    allow_origins=[
+        "http://localhost:8501",      # Local development
+        "http://localhost:8080",      # Local frontend on 8080
+        "http://134.76.20.16:8080",   # VM frontend deployment
+        "http://134.76.20.16:8000",   # VM backend (for testing)
+    ],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],

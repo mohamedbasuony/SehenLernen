@@ -13,18 +13,24 @@ def _session_params():
     return {'session_id': sid} if sid else {}
 
 def _request_get(url, **kwargs):
-    return requests.get(url, params=_session_params(), **kwargs)
+    params = kwargs.pop('params', {})
+    params.update(_session_params())
+    return requests.get(url, params=params, **kwargs)
 
 def _request_post(url, **kwargs):
-    return requests.post(url, params=_session_params(), **kwargs)
+    params = kwargs.pop('params', {})
+    params.update(_session_params())
+    return requests.post(url, params=params, **kwargs)
 
 def _request_delete(url, **kwargs):
-    return requests.delete(url, params=_session_params(), **kwargs)
+    params = kwargs.pop('params', {})
+    params.update(_session_params())
+    return requests.delete(url, params=params, **kwargs)
 
 
 
 def _get_base_url():
-    return os.getenv("SEHEN_LERNEN_API_URL", "http://localhost:8000")
+    return os.getenv("SEHEN_LERNEN_API_URL", "http://134.76.20.16:8000")
 
 
 def get_current_image_ids():
