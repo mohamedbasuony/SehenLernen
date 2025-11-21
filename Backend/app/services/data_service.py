@@ -4,6 +4,7 @@ import logging
 from pathlib import Path
 import pandas as pd
 from fastapi import UploadFile
+from typing import Optional
 from PIL import Image
 import io
 import zipfile
@@ -15,12 +16,19 @@ import tempfile
 import requests
 
 from app.utils.image_utils import base64_to_bytes
+import contextvars
 from app.utils.csv_utils import read_metadata_file
 
-# Directory to store images
+# Directory to store images (legacy/persistent fallback)
 BASE_DIR = Path(__file__).resolve().parent.parent.parent
 IMAGE_DIR = BASE_DIR / "storage" / "images"
 IMAGE_DIR.mkdir(parents=True, exist_ok=True)
+
+# In-memory per-session image storage: { session_id: { image_id: bytes } }
+SESSION_IMAGES: dict[str, dict[str, bytes]] = {}
+
+# Context var to hold the current session id for the active request (optional)
+CURRENT_SESSION_ID: contextvars.ContextVar[Optional[str]] = contextvars.ContextVar("current_session_id", default=None)
 
 # In-memory metadata and configuration
 metadata_df = None
@@ -29,29 +37,49 @@ col_mapping = {}
 
 # ---- Image upload / metadata config ----
 
-async def save_uploaded_image(file: UploadFile) -> str:
+async def save_uploaded_image(file: UploadFile, session_id: str | None = None) -> str:
     """
-    Save a single uploaded image file to disk and return the image ID (filename).
+    Save a single uploaded image file. If `session_id` is provided, store in-memory
+    for that session; otherwise persist to disk (legacy behavior).
+    Returns the image ID (filename).
     """
     contents = await file.read()
     filename = file.filename
+
+    if session_id:
+        session = SESSION_IMAGES.setdefault(session_id, {})
+        session[filename] = contents
+        return filename
+
     file_path = IMAGE_DIR / filename
     with open(file_path, "wb") as f:
         f.write(contents)
     return filename
 
-async def save_uploaded_images(files: list[UploadFile]) -> list[str]:
+async def save_uploaded_images(files: list[UploadFile], session_id: str | None = None) -> list[str]:
     """
     Save uploaded image files to disk and return list of image IDs (filenames).
     NOTE: Current behavior clears existing images on each upload batch.
     """
-    # Clear existing images
+    image_ids = []
+
+    if session_id:
+        session = SESSION_IMAGES.setdefault(session_id, {})
+        # Do not clear other sessions. Clear only this session's images.
+        session.clear()
+        for file in files:
+            contents = await file.read()
+            filename = file.filename
+            session[filename] = contents
+            image_ids.append(filename)
+        return image_ids
+
+    # Legacy behavior: clear global persistent directory and save
     for f in os.listdir(IMAGE_DIR):
         file_path = IMAGE_DIR / f
         if file_path.is_file():
             file_path.unlink()
 
-    image_ids = []
     for file in files:
         contents = await file.read()
         filename = file.filename
@@ -62,7 +90,7 @@ async def save_uploaded_images(files: list[UploadFile]) -> list[str]:
     return image_ids
 
 
-async def save_and_extract_zip(zip_file: UploadFile) -> list[str]:
+async def save_and_extract_zip(zip_file: UploadFile, session_id: str | None = None) -> list[str]:
     """
     Save the zip temporarily, extract only image files
     (.png/.jpg/.jpeg/.tif/...) to BASE_DATA_DIR and return
@@ -86,11 +114,21 @@ async def save_and_extract_zip(zip_file: UploadFile) -> list[str]:
             # Filter image extensions
             if not member.filename.lower().endswith((".png", ".jpg", ".jpeg", ".tif", ".tiff")):
                 continue
-            dest_path = IMAGE_DIR / member.filename
-            dest_path.parent.mkdir(parents=True, exist_ok=True)
-            # Safe extraction: prevent path traversal
-            _safe_extract(z, member, dest_path)
-            extracted.append(str(dest_path.resolve()))
+            filename = member.filename
+
+            if session_id:
+                # Read member bytes into memory for the session
+                with z.open(member) as src:
+                    content = src.read()
+                session = SESSION_IMAGES.setdefault(session_id, {})
+                session[filename] = content
+                extracted.append(filename)
+            else:
+                dest_path = IMAGE_DIR / filename
+                dest_path.parent.mkdir(parents=True, exist_ok=True)
+                # Safe extraction: prevent path traversal
+                _safe_extract(z, member, dest_path)
+                extracted.append(str(dest_path.resolve()))
 
     # 3) Remove temporary source
     tmp_path.unlink(missing_ok=True)
@@ -127,19 +165,30 @@ async def configure_metadata(id_col: str, mapping: dict) -> None:
     image_id_col = id_col
     col_mapping = mapping
 
-def load_image(image_id: str) -> bytes:
+def load_image(image_id: str, session_id: str | None = None) -> bytes:
     """
     Load a stored image by its ID (filename) and return raw bytes.
+    If `session_id` is provided, try the in-memory session store first.
     """
+    sid = session_id if session_id is not None else CURRENT_SESSION_ID.get()
+    if sid:
+        session = SESSION_IMAGES.get(sid, {})
+        if image_id in session:
+            return session[image_id]
+
     file_path = IMAGE_DIR / image_id
     if not file_path.exists():
         raise FileNotFoundError(f"Image {image_id} not found")
     return file_path.read_bytes()
 
-def get_all_image_ids() -> list[str]:
+def get_all_image_ids(session_id: str | None = None) -> list[str]:
     """
-    Return list of all saved image IDs (filenames).
+    Return list of all saved image IDs. If session_id is provided, return only
+    that session's images.
     """
+    sid = session_id if session_id is not None else CURRENT_SESSION_ID.get()
+    if sid:
+        return list(SESSION_IMAGES.get(sid, {}).keys())
     return [p.name for p in IMAGE_DIR.glob("*") if p.is_file()]
 
 # ---- Cropping replace ----
@@ -189,6 +238,29 @@ def replace_image(image_id: str, base64_data: str) -> None:
     except Exception as e:
         logging.error(f"Failed to write image file: {e}")
         raise OSError(f"Failed to write image file: {str(e)}")
+
+
+def replace_image_in_session(session_id: str, image_id: str, base64_data: str) -> None:
+    """
+    Replace an image stored in a session's in-memory store.
+    """
+    session = SESSION_IMAGES.get(session_id)
+    if not session or image_id not in session:
+        raise FileNotFoundError(f"Image {image_id} not found in session {session_id}")
+
+    try:
+        img_bytes = base64_to_bytes(base64_data)
+    except Exception as e:
+        logging.error(f"Base64 decoding error: {e}")
+        raise ValueError(f"Invalid base64 image data: {str(e)}")
+
+    # Validate
+    try:
+        _validate_image_bytes(img_bytes)
+    except ValueError:
+        raise
+
+    session[image_id] = img_bytes
 
 # ---- Extract images from CSV (with UA + 3s timeout) ----
 
@@ -323,15 +395,23 @@ def get_image_by_id(image_id: str) -> bytes:
         return f.read()
 
 
-def clear_all_images() -> None:
-    """Clear all stored images and reset metadata."""
+def clear_all_images(session_id: str | None = None) -> None:
+    """Clear stored images and reset metadata.
+
+    If session_id is provided, only clear that session's in-memory images.
+    Otherwise clear persistent disk storage and reset metadata.
+    """
     global metadata_df, image_id_col, col_mapping
-    
+
+    if session_id:
+        SESSION_IMAGES.pop(session_id, None)
+        return
+
     # Clear all image files
     for file_path in IMAGE_DIR.glob("*"):
         if file_path.is_file():
             file_path.unlink()
-    
+
     # Reset metadata
     metadata_df = None
     image_id_col = None

@@ -8,14 +8,29 @@ from io import BytesIO
 from PIL import Image
 
 
+def _session_params():
+    sid = st.session_state.get('session_id')
+    return {'session_id': sid} if sid else {}
+
+def _request_get(url, **kwargs):
+    return requests.get(url, params=_session_params(), **kwargs)
+
+def _request_post(url, **kwargs):
+    return requests.post(url, params=_session_params(), **kwargs)
+
+def _request_delete(url, **kwargs):
+    return requests.delete(url, params=_session_params(), **kwargs)
+
+
+
 def _get_base_url():
-    return os.getenv("SEHEN_LERNEN_API_URL", "https://basuony-sehenlernen.hf.space")
+    return os.getenv("SEHEN_LERNEN_API_URL", "http://localhost:8000")
 
 
 def get_current_image_ids():
     """Get the current image IDs from backend in the order they are stored."""
     url = f"{_get_base_url()}/upload/current-image-ids"
-    resp = requests.get(url)
+    resp = _request_get(url)
     resp.raise_for_status()
     return resp.json().get("image_ids", [])
 
@@ -23,7 +38,7 @@ def get_current_image_ids():
 def get_image_by_id(image_id: str) -> Image.Image:
     """Fetch a single image from backend by its ID and return as PIL Image."""
     url = f"{_get_base_url()}/upload/image/{image_id}"
-    resp = requests.get(url)
+    resp = _request_get(url)
     resp.raise_for_status()
     return Image.open(BytesIO(resp.content))
 
@@ -44,7 +59,7 @@ def get_all_images() -> list[Image.Image]:
 def clear_all_backend_images():
     """Clear all images from the backend storage."""
     url = f"{_get_base_url()}/upload/clear-all-images"
-    resp = requests.delete(url)
+    resp = _request_delete(url)
     resp.raise_for_status()
     return resp.json()
 
@@ -68,7 +83,7 @@ def upload_images(image_files=None, zip_file=None):
     if not files:
         raise ValueError("No files provided")
 
-    resp = requests.post(url, files=files)
+    resp = _request_post(url, files=files)
     resp.raise_for_status()
     return resp.json().get("image_ids", [])
 
@@ -77,7 +92,7 @@ def upload_metadata_file(csv_file, delimiter, decimal_sep):
     url = f"{_get_base_url()}/upload/metadata"
     files = {"file": (csv_file.name, csv_file.getvalue(), csv_file.type)}
     data = {"delimiter": delimiter, "decimal_sep": decimal_sep}
-    resp = requests.post(url, files=files, data=data)
+    resp = _request_post(url, files=files, data=data)
     resp.raise_for_status()
     return resp.json().get("columns", [])
 
@@ -85,7 +100,7 @@ def upload_metadata_file(csv_file, delimiter, decimal_sep):
 def configure_metadata(image_id_col, col_mapping):
     url = f"{_get_base_url()}/upload/metadata/configure"
     payload = {"image_id_col": image_id_col, "col_mapping": col_mapping}
-    resp = requests.post(url, json=payload)
+    resp = _request_post(url, json=payload)
     resp.raise_for_status()
     return resp.json()
 
@@ -95,7 +110,7 @@ def configure_metadata(image_id_col, col_mapping):
 # -----------------------------
 def filter_sampling(filter_values):
     url = f"{_get_base_url()}/sampling/filter"
-    resp = requests.post(url, json={"filters": filter_values})
+    resp = _request_post(url, json={"filters": filter_values})
     resp.raise_for_status()
     return resp.json().get("sampled_ids", [])
 
@@ -103,7 +118,7 @@ def filter_sampling(filter_values):
 def stratified_sampling(target_col, sample_size):
     url = f"{_get_base_url()}/sampling/stratified"
     payload = {"target_col": target_col, "sample_size": sample_size}
-    resp = requests.post(url, json=payload)
+    resp = _request_post(url, json=payload)
     resp.raise_for_status()
     return resp.json().get("sampled_ids", [])
 
@@ -113,7 +128,7 @@ def stratified_sampling(target_col, sample_size):
 # -----------------------------
 def generate_histogram(params):
     url = f"{_get_base_url()}/features/histogram"
-    resp = requests.post(url, json=params)
+    resp = _request_post(url, json=params)
     resp.raise_for_status()
     b64_list = resp.json().get("histograms", [])
     return [base64.b64decode(b) for b in b64_list]
@@ -121,7 +136,7 @@ def generate_histogram(params):
 
 def perform_kmeans(params):
     url = f"{_get_base_url()}/features/kmeans"
-    resp = requests.post(url, json=params)
+    resp = _request_post(url, json=params)
     try:
         resp.raise_for_status()
         data = resp.json()
@@ -152,7 +167,7 @@ def perform_single_image_kmeans(params):
     Returns (segmented_image_bytes, comparison_plot_bytes)
     """
     url = f"{_get_base_url()}/features/kmeans-single-image"
-    resp = requests.post(url, json=params)
+    resp = _request_post(url, json=params)
     try:
         resp.raise_for_status()
         data = resp.json()
@@ -194,7 +209,7 @@ def extract_shape_features(params):
       }
     """
     url = f"{_get_base_url()}/features/shape"
-    resp = requests.post(url, json=params)
+    resp = _request_post(url, json=params)
     resp.raise_for_status()
     data = resp.json()
     result = {"features": data.get("features", [])}
@@ -212,7 +227,7 @@ def extract_haralick_texture(params):
         files.append(("test_images", (f.name, f.getvalue(), f.type)))
     train_labels = params.get("train_labels")
     files.append(("train_labels", (train_labels.name, train_labels.getvalue(), train_labels.type)))
-    resp = requests.post(url, files=files)
+    resp = _request_post(url, files=files)
     resp.raise_for_status()
     data = resp.json()
     return data.get("labels", []), data.get("predictions", [])
@@ -234,7 +249,7 @@ def replace_image(image_id: str, pil_image: Image.Image, format_hint: str = "PNG
     url = f"{_get_base_url()}/upload/replace-image"
     payload = {"image_id": image_id, "image_data_base64": img_b64}
 
-    resp = requests.post(url, json=payload)
+    resp = _request_post(url, json=payload)
     try:
         resp.raise_for_status()
     except requests.exceptions.HTTPError:
@@ -260,7 +275,7 @@ def replace_image(image_id: str, pil_image: Image.Image, format_hint: str = "PNG
 def extract_images_from_csv(csv_file):
     url = f"{_get_base_url()}/upload/extract-from-csv"
     files = {"file": (csv_file.name, csv_file.getvalue(), csv_file.type or "text/csv")}
-    resp = requests.post(url, files=files)
+    resp = _request_post(url, files=files)
     resp.raise_for_status()
 
     data = resp.json()
@@ -282,7 +297,7 @@ def extract_images_from_csv(csv_file):
 # -----------------------------
 def extract_haralick_features(params):
     url = f"{_get_base_url()}/features/haralick/extract"
-    resp = requests.post(url, json=params)
+    resp = _request_post(url, json=params)
     resp.raise_for_status()
     return resp.json()
 
@@ -292,7 +307,7 @@ def extract_haralick_features(params):
 # -----------------------------
 def extract_lbp_features(params):
     url = f"{_get_base_url()}/features/lbp"
-    resp = requests.post(url, json=params)
+    resp = _request_post(url, json=params)
     resp.raise_for_status()
     data = resp.json()
 
@@ -325,7 +340,7 @@ def extract_contours(params):
     }
     """
     url = f"{_get_base_url()}/features/contours"
-    resp = requests.post(url, json=params)
+    resp = _request_post(url, json=params)
     resp.raise_for_status()
     data = resp.json()
 
@@ -370,7 +385,7 @@ def extract_hog_features(
         payload["resize_width"] = int(resize_width)
         payload["resize_height"] = int(resize_height)
 
-    resp = requests.post(url, json=payload)
+    resp = _request_post(url, json=payload)
     resp.raise_for_status()
     data = resp.json()
 
@@ -413,7 +428,7 @@ def extract_sift_features(params):
         }
     """
     url = f"{_get_base_url()}/features/sift"
-    resp = requests.post(url, json=params)
+    resp = _request_post(url, json=params)
     resp.raise_for_status()
     data = resp.json()
 
@@ -493,7 +508,7 @@ def similarity_search(
     if hist_channels:
         payload["hist_channels"] = hist_channels
     
-    resp = requests.post(url, json=payload)
+    resp = _request_post(url, json=payload)
     resp.raise_for_status()
     return resp.json()
 
@@ -527,7 +542,7 @@ def precompute_similarity_features(
     if hist_channels:
         params["hist_channels"] = hist_channels
     
-    resp = requests.post(url, params=params)
+    resp = _request_post(url, params=params)
     resp.raise_for_status()
     return resp.json()
 
@@ -535,7 +550,7 @@ def precompute_similarity_features(
 def clear_similarity_cache():
     """Clear the similarity feature cache."""
     url = f"{_get_base_url()}/similarity/cache"
-    resp = requests.delete(url)
+    resp = _request_delete(url)
     resp.raise_for_status()
     return resp.json()
 
@@ -543,7 +558,7 @@ def clear_similarity_cache():
 def get_similarity_cache_stats():
     """Get statistics about the similarity feature cache."""
     url = f"{_get_base_url()}/similarity/cache/stats"
-    resp = requests.get(url)
+    resp = _request_get(url)
     resp.raise_for_status()
     return resp.json()
 
@@ -551,7 +566,7 @@ def get_similarity_cache_stats():
 def get_similarity_methods():
     """Get available feature extraction methods and distance metrics."""
     url = f"{_get_base_url()}/similarity/methods"
-    resp = requests.get(url)
+    resp = _request_get(url)
     resp.raise_for_status()
     return resp.json()
 
@@ -573,7 +588,7 @@ def extract_edge_features(
         "high_thresh": high_thresh,
         "sobel_ksize": sobel_ksize,
     }
-    resp = requests.post(url, json=params, params=query_params)
+    resp = _request_post(url, json=params, params=query_params)
     resp.raise_for_status()
     data = resp.json()
 
@@ -623,7 +638,7 @@ def extract_fast_features(
     if fast_type is not None:
         payload["fast_type"] = str(fast_type)
 
-    resp = requests.post(url, json=payload)
+    resp = _request_post(url, json=payload)
     resp.raise_for_status()
     data = resp.json()
 
@@ -662,7 +677,7 @@ def extract_image_embedding(params):
             - num_images: number of images processed
     """
     url = f"{_get_base_url()}/features/embedding"
-    resp = requests.post(url, json=params)
+    resp = _request_post(url, json=params)
     resp.raise_for_status()
     return resp.json()
 
@@ -675,7 +690,7 @@ def train_classifier(params):
     POST /features/train-classifier with a payload matching ClassifierTrainingRequest.
     """
     url = f"{_get_base_url()}/features/train-classifier"
-    resp = requests.post(url, json=params)
+    resp = _request_post(url, json=params)
     resp.raise_for_status()
     return resp.json()
 
@@ -685,6 +700,6 @@ def predict_classifier(params):
     POST /features/predict-classifier with a payload matching ClassifierPredictionRequest.
     """
     url = f"{_get_base_url()}/features/predict-classifier"
-    resp = requests.post(url, json=params)
+    resp = _request_post(url, json=params)
     resp.raise_for_status()
     return resp.json()

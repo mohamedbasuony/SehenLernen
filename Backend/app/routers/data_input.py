@@ -1,6 +1,6 @@
 # backend/app/routers/data_input.py
 
-from fastapi import APIRouter, UploadFile, Form, File, HTTPException
+from fastapi import APIRouter, UploadFile, Form, File, HTTPException, Query
 from fastapi.responses import JSONResponse, Response
 from typing import List, Optional
 import logging
@@ -14,22 +14,22 @@ router = APIRouter()
 @router.post("/images")
 async def upload_images(
     images: Optional[List[UploadFile]] = File(None, description="Imagens soltas"),
-    zip_file: Optional[UploadFile] = File(None, description="Zip contendo imagens")
+    zip_file: Optional[UploadFile] = File(None, description="Zip contendo imagens"),
+    session_id: Optional[str] = Query(None, description="Optional session id for per-user in-memory storage")
 ):
     try:
         saved_files = []
 
         # 1) imagens avulsas
         if images:
-            for img in images:
-                saved_path = await data_service.save_uploaded_image(img)
-                saved_files.append(saved_path)
-
+            # Save into session if session_id provided, otherwise persist
+            saved = await data_service.save_uploaded_images(images, session_id=session_id)
+            saved_files.extend(saved)
         # 2) ZIP
         if zip_file:
             if not zip_file.filename.lower().endswith(".zip"):
                 raise HTTPException(status_code=400, detail="zip_file deve ser .zip")
-            extracted_paths = await data_service.save_and_extract_zip(zip_file)
+            extracted_paths = await data_service.save_and_extract_zip(zip_file, session_id=session_id)
             saved_files.extend(extracted_paths)
 
         if not saved_files:
@@ -63,14 +63,17 @@ async def configure_metadata(req: ConfigureMetadataRequest):
         return JSONResponse(status_code=500, content={"error": str(e)})
 
 @router.post("/replace-image")
-async def replace_image(request: ReplaceImageRequest):
+async def replace_image(request: ReplaceImageRequest, session_id: Optional[str] = Query(None)):
     """
     Replace an existing image on the backend with a new (cropped) version.
     The replacement is persistent and affects all downstream processing.
     """
     try:
         logging.info(f"Received request to replace image: {request.image_id}")
-        data_service.replace_image(request.image_id, request.image_data_base64)
+        if session_id:
+            data_service.replace_image_in_session(session_id, request.image_id, request.image_data_base64)
+        else:
+            data_service.replace_image(request.image_id, request.image_data_base64)
         logging.info("Image replacement successful")
         return {"status": "success"}
     except FileNotFoundError as e:
@@ -90,7 +93,7 @@ async def replace_image(request: ReplaceImageRequest):
 # New: Extract images from CSV of URLs
 # -----------------------------
 @router.post("/extract-from-csv")
-async def extract_from_csv(file: UploadFile = File(...)):
+async def extract_from_csv(file: UploadFile = File(...), session_id: Optional[str] = Query(None)):
     """
     Accept a CSV file where each row contains an image URL.
     Downloads all images, stores them in IMAGE_DIR (clearing old ones),
@@ -113,10 +116,13 @@ async def extract_from_csv(file: UploadFile = File(...)):
 
 
 @router.get("/current-image-ids")
-async def get_current_image_ids():
-    """Get the current image IDs in the order they are stored in the backend."""
+async def get_current_image_ids(session_id: Optional[str] = Query(None)):
+    """Get the current image IDs in the order they are stored in the backend.
+
+    If session_id is provided, return only that session's images.
+    """
     try:
-        image_ids = data_service.get_all_image_ids()
+        image_ids = data_service.get_all_image_ids(session_id=session_id)
         return {"image_ids": image_ids}
     except Exception as e:
         logging.exception("Failed to get image IDs")
@@ -124,10 +130,10 @@ async def get_current_image_ids():
 
 
 @router.get("/image/{image_id}")
-async def get_image(image_id: str):
-    """Get a single image by its ID."""
+async def get_image(image_id: str, session_id: Optional[str] = Query(None)):
+    """Get a single image by its ID. If session_id is provided, look up in-memory session store."""
     try:
-        image_bytes = data_service.get_image_by_id(image_id)
+        image_bytes = data_service.load_image(image_id, session_id=session_id)
         return Response(content=image_bytes, media_type="image/png")
     except FileNotFoundError:
         raise HTTPException(status_code=404, detail=f"Image not found: {image_id}")
@@ -137,11 +143,11 @@ async def get_image(image_id: str):
 
 
 @router.delete("/clear-all-images")
-async def clear_all_images():
-    """Clear all stored images from the backend."""
+async def clear_all_images(session_id: Optional[str] = Query(None)):
+    """Clear stored images. If session_id provided, clear only that session's images."""
     try:
-        data_service.clear_all_images()
-        return {"message": "All images cleared successfully"}
+        data_service.clear_all_images(session_id=session_id)
+        return {"message": "Images cleared successfully"}
     except Exception as e:
         logging.exception("Failed to clear images")
         raise HTTPException(status_code=500, detail="Failed to clear images")

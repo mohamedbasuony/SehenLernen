@@ -8,6 +8,12 @@ from components.stats_analysis import render_stats_analysis
 from components.visualization import render_visualization
 from components.seher_smart_chat import render_smart_chat, update_chat_context, add_chat_message
 
+import uuid
+
+# Per-session identifier used to isolate uploads from other users
+if "session_id" not in st.session_state:
+    st.session_state["session_id"] = uuid.uuid4().hex
+
 # --- Page Configuration ---
 st.set_page_config(
     page_title="Sehen Lernen", 

@@ -4,7 +4,7 @@ import logging
 import base64
 from typing import List, Dict, Any, Optional
 
-from fastapi import APIRouter, HTTPException, UploadFile, File
+from fastapi import APIRouter, HTTPException, UploadFile, File, Query
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
@@ -22,6 +22,7 @@ from app.services.feature_service import (
     train_classifier_service,
     predict_classifier_service,
 )
+from app.services import data_service
 
 from app.models.requests import (
     HaralickExtractRequest,
@@ -63,17 +64,21 @@ class SingleImageKMeansRequest(BaseModel):
 # Endpoints
 # -------------------------------
 @router.post("/histogram")
-async def histogram(request: HistogramRequest):
+async def histogram(request: HistogramRequest, session_id: Optional[str] = Query(None)):
     """
     Generate one or more histograms for the uploaded images (color or grayscale).
     """
     try:
-        b64_list = generate_histogram_service(
-            hist_type=request.hist_type,
-            image_index=request.image_index,
-            all_images=request.all_images
-        )
-        return {"histograms": b64_list}
+        token = data_service.CURRENT_SESSION_ID.set(session_id)
+        try:
+            b64_list = generate_histogram_service(
+                hist_type=request.hist_type,
+                image_index=request.image_index,
+                all_images=request.all_images
+            )
+            return {"histograms": b64_list}
+        finally:
+            data_service.CURRENT_SESSION_ID.reset(token)
     except Exception:
         logging.exception("Failed to generate histogram")
         return JSONResponse(
@@ -83,43 +88,51 @@ async def histogram(request: HistogramRequest):
 
 
 @router.post("/kmeans")
-def kmeans(request: KMeansRequest):
+def kmeans(request: KMeansRequest, session_id: Optional[str] = Query(None)):
     """
     Perform K-means clustering on selected images (color-histogram features + PCA2 for plotting).
     """
     try:
-        plot_b64, assignments = perform_kmeans_service(
-            n_clusters=request.n_clusters,
-            random_state=request.random_state,
-            selected_images=request.selected_images,
-            use_all_images=request.use_all_images
-        )
-        return {"plot": plot_b64, "assignments": assignments}
+        token = data_service.CURRENT_SESSION_ID.set(session_id)
+        try:
+            plot_b64, assignments = perform_kmeans_service(
+                n_clusters=request.n_clusters,
+                random_state=request.random_state,
+                selected_images=request.selected_images,
+                use_all_images=request.use_all_images
+            )
+            return {"plot": plot_b64, "assignments": assignments}
+        finally:
+            data_service.CURRENT_SESSION_ID.reset(token)
     except Exception as e:
         logging.exception("Failed to do the clustering K-means")
         raise HTTPException(status_code=500, detail=str(e))
 
 
 @router.post("/kmeans-single-image")
-def kmeans_single_image(request: SingleImageKMeansRequest):
+def kmeans_single_image(request: SingleImageKMeansRequest, session_id: Optional[str] = Query(None)):
     """
     Perform K-means clustering on pixels within a single image to segment by color.
     """
     try:
-        segmented_b64, plot_b64 = perform_single_image_kmeans_service(
-            image_index=request.image_index,
-            n_clusters=request.n_clusters,
-            random_state=request.random_state,
-            max_pixels=request.max_pixels
-        )
-        return {"segmented_image": segmented_b64, "comparison_plot": plot_b64}
+        token = data_service.CURRENT_SESSION_ID.set(session_id)
+        try:
+            segmented_b64, plot_b64 = perform_single_image_kmeans_service(
+                image_index=request.image_index,
+                n_clusters=request.n_clusters,
+                random_state=request.random_state,
+                max_pixels=request.max_pixels
+            )
+            return {"segmented_image": segmented_b64, "comparison_plot": plot_b64}
+        finally:
+            data_service.CURRENT_SESSION_ID.reset(token)
     except Exception as e:
         logging.exception("Failed to do single-image K-means clustering")
         raise HTTPException(status_code=500, detail=str(e))
 
 
 @router.post("/shape")
-def shape_features(request: ShapeRequest):
+def shape_features(request: ShapeRequest, session_id: Optional[str] = Query(None)):
     """
     Extract shape/structure features from a single image.
 
@@ -132,7 +145,9 @@ def shape_features(request: ShapeRequest):
           fast_threshold, fast_nonmax, fast_type ("TYPE_9_16" | "TYPE_7_12" | "TYPE_5_8")
     """
     try:
-        features, viz_b64 = extract_shape_service(
+        token = data_service.CURRENT_SESSION_ID.set(session_id)
+        try:
+            features, viz_b64 = extract_shape_service(
             method=request.method,
             image_index=request.image_index,
             # HOG params (service ignores when method != "HOG")
@@ -147,10 +162,12 @@ def shape_features(request: ShapeRequest):
             fast_nonmax=getattr(request, "fast_nonmax", None),
             fast_type=getattr(request, "fast_type", None),
         )
-        response: Dict[str, Any] = {"features": features}
-        if viz_b64:
-            response["visualization"] = viz_b64
-        return response
+            response: Dict[str, Any] = {"features": features}
+            if viz_b64:
+                response["visualization"] = viz_b64
+            return response
+        finally:
+            data_service.CURRENT_SESSION_ID.reset(token)
     except Exception:
         logging.exception("Failed to extract shape features")
         raise HTTPException(status_code=500, detail="Internal server error extracting shape features")
